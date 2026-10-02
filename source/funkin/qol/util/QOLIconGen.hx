@@ -38,7 +38,7 @@ class QOLIconGen
     {
       var hash = 0;
       for (i in 0...title.length)
-        hash = (hash * 31 + title.charCodeAt(i)) & 0x7FFFFFFF;
+        hash = (hash * 31 + StringTools.fastCodeAt(title, i)) & 0x7FFFFFFF;
       var palette = PALETTES[hash % PALETTES.length];
 
       var bmp = new BitmapData(size, size, true, 0x00000000);
