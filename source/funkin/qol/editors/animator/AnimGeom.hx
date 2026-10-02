@@ -1,7 +1,12 @@
 package funkin.qol.editors.animator;
 
 import funkin.qol.editors.animator.AnimData;
+import openfl.display.CapsStyle;
+import openfl.display.GradientType;
 import openfl.display.Graphics;
+import openfl.display.InterpolationMethod;
+import openfl.display.JointStyle;
+import openfl.display.SpreadMethod;
 import openfl.geom.Matrix;
 import openfl.geom.Rectangle;
 
@@ -94,18 +99,65 @@ class AnimGeom
   // Paths
   //
 
-  public static function drawPath(g:Graphics, p:AnimPath, outline:Bool = false, outlineColor:Int = 0xFF5CE1FF):Void
+  public static function drawPath(g:Graphics, p:AnimPath, outline:Bool = false, outlineColor:Int = 0xFF5CE1FF,
+      ?bitmapOf:String->Null<openfl.display.BitmapData>):Void
   {
+    var filled = false;
     if (outline)
     {
       g.lineStyle(1, outlineColor & 0xFFFFFF, 1, false, NONE);
     }
     else
     {
-      if (p.stroke != null && (p.width ?? 1) > 0) g.lineStyle(p.width ?? 1, p.stroke & 0xFFFFFF, ((p.stroke >>> 24) & 0xFF) / 255, false, NORMAL, ROUND, ROUND);
+      if (p.stroke != null && (p.width ?? 1) > 0)
+      {
+        var caps:CapsStyle = switch (p.caps)
+        {
+          case 'none': CapsStyle.NONE;
+          case 'square': CapsStyle.SQUARE;
+          default: CapsStyle.ROUND;
+        };
+        var joints:JointStyle = switch (p.joints)
+        {
+          case 'miter': JointStyle.MITER;
+          case 'bevel': JointStyle.BEVEL;
+          default: JointStyle.ROUND;
+        };
+        g.lineStyle(p.width ?? 1, p.stroke & 0xFFFFFF, ((p.stroke >>> 24) & 0xFF) / 255, false, p.hairline == true ? NONE : NORMAL, caps, joints, 3);
+      }
       else
         g.lineStyle();
-      if (p.fill != null) g.beginFill(p.fill & 0xFFFFFF, ((p.fill >>> 24) & 0xFF) / 255);
+      if (p.gradient != null && p.gradient.colors.length > 0)
+      {
+        var gr = p.gradient;
+        var m = gr.matrix;
+        g.beginGradientFill(gr.type == 'radial' ? GradientType.RADIAL : GradientType.LINEAR, [for (c in gr.colors) c & 0xFFFFFF],
+          [for (c in gr.colors) ((c >>> 24) & 0xFF) / 255], gr.ratios, new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]), switch (gr.spread)
+          {
+            case 'reflect': SpreadMethod.REFLECT;
+            case 'repeat': SpreadMethod.REPEAT;
+            default: SpreadMethod.PAD;
+          }, gr.linearRGB == true ? InterpolationMethod.LINEAR_RGB : InterpolationMethod.RGB, gr.focal ?? 0);
+        filled = true;
+      }
+      else if (p.bitmapFill != null && bitmapOf != null && bitmapOf(p.bitmapFill.bitmap) != null)
+      {
+        var bf = p.bitmapFill;
+        var m = bf.matrix;
+        g.beginBitmapFill(bitmapOf(bf.bitmap), new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]), bf.clip != true, bf.smooth != false);
+        filled = true;
+      }
+      else if (p.fill != null)
+      {
+        g.beginFill(p.fill & 0xFFFFFF, ((p.fill >>> 24) & 0xFF) / 255);
+        filled = true;
+      }
+      if (filled)
+      {
+        if (usesNonZero(p)) @:privateAccess g.__commands.windingNonZero();
+        else
+          @:privateAccess g.__commands.windingEvenOdd();
+      }
     }
     var d = p.d;
     var i = 0;
@@ -136,7 +188,7 @@ class AnimGeom
           i = d.length;
       }
     }
-    if (!outline && p.fill != null) g.endFill();
+    if (filled) g.endFill();
     g.lineStyle();
   }
 
@@ -254,8 +306,11 @@ class AnimGeom
    */
   public static function pathContains(p:AnimPath, px:Float, py:Float):Bool
   {
+    var polys = flatten(p, 8);
+    var nonZero = usesNonZero(p);
     var inside = false;
-    for (poly in flatten(p, 8))
+    var winding = 0;
+    for (poly in polys)
     {
       var n = poly.length >> 1;
       var j = n - 1;
@@ -263,15 +318,58 @@ class AnimGeom
       {
         var xi = poly[i * 2], yi = poly[i * 2 + 1];
         var xj = poly[j * 2], yj = poly[j * 2 + 1];
-        if (((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi)) inside = !inside;
+        if (((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi))
+        {
+          inside = !inside;
+          winding += yi > yj ? 1 : -1;
+        }
         j = i;
       }
     }
-    return inside;
+    return nonZero ? winding != 0 : inside;
   }
 
   /**
-   * Turn a path into polylines (curves split into `steps` segments). One array per subpath: [x0, y0, x1, y1, ...].
+   * Whether a fill covers everything inside its outline even where the outline crosses itself (a brush stroke looping
+   * over itself stays solid). Paths with one outline do; paths with several outlines (shapes with holes) use even-odd
+   * unless `winding` says otherwise.
+   */
+  public static function usesNonZero(p:AnimPath):Bool
+  {
+    if (p.winding != null) return p.winding == 'nonzero';
+    var d = p.d;
+    var moves = 0;
+    var i = 0;
+    while (i < d.length)
+    {
+      switch (Std.int(d[i]))
+      {
+        case 0:
+          if (++moves > 1) return false;
+          i += 3;
+        case 1:
+          i += 3;
+        case 2:
+          i += 5;
+        case 3:
+          i += 7;
+        case 4:
+          i += 1;
+        default:
+          return moves <= 1;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * How many line pieces a curve this long needs to look smooth (steps = 0 in `flatten`).
+   */
+  static inline function stepsFor(len:Float):Int
+    return Std.int(Math.max(2, Math.min(48, Math.ceil(len / 2.5))));
+
+  /**
+   * Turn a path into polylines (curves split into `steps` segments, or as many as they need with 0). One array per subpath: [x0, y0, x1, y1, ...].
    */
   public static function flatten(p:AnimPath, steps:Int = 8):Array<Array<Float>>
   {
@@ -298,9 +396,10 @@ class AnimGeom
           i += 3;
         case 2:
           var cx = d[i + 1], cy = d[i + 2], x = d[i + 3], y = d[i + 4];
-          for (s in 1...steps + 1)
+          var n = steps > 0 ? steps : stepsFor(Math.sqrt((cx - lx) * (cx - lx) + (cy - ly) * (cy - ly)) + Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)));
+          for (s in 1...n + 1)
           {
-            var t = s / steps;
+            var t = s / n;
             var u = 1 - t;
             cur.push(u * u * lx + 2 * u * t * cx + t * t * x);
             cur.push(u * u * ly + 2 * u * t * cy + t * t * y);
@@ -310,9 +409,11 @@ class AnimGeom
           i += 5;
         case 3:
           var c1x = d[i + 1], c1y = d[i + 2], c2x = d[i + 3], c2y = d[i + 4], x = d[i + 5], y = d[i + 6];
-          for (s in 1...steps + 1)
+          var n = steps > 0 ? steps : stepsFor(Math.sqrt((c1x - lx) * (c1x - lx) + (c1y - ly) * (c1y - ly))
+            + Math.sqrt((c2x - c1x) * (c2x - c1x) + (c2y - c1y) * (c2y - c1y)) + Math.sqrt((x - c2x) * (x - c2x) + (y - c2y) * (y - c2y)));
+          for (s in 1...n + 1)
           {
-            var t = s / steps;
+            var t = s / n;
             var u = 1 - t;
             cur.push(u * u * u * lx + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x);
             cur.push(u * u * u * ly + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y);

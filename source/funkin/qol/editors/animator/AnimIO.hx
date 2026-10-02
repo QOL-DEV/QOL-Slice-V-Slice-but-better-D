@@ -117,6 +117,26 @@ class AnimIO
     }
   }
 
+  /**
+   * Decode any image the platform can read (PNG right away, JPEG/GIF/BMP/WebP... through OpenFL).
+   */
+  public static function decodeImage(bytes:Bytes, done:Null<BitmapData>->Void):Void
+  {
+    if (bytes.length > 8 && bytes.get(0) == 0x89 && bytes.get(1) == 0x50)
+    {
+      done(decodePNG(bytes));
+      return;
+    }
+    try
+    {
+      BitmapData.loadFromBytes(ByteArray.fromBytes(bytes)).onComplete(b -> done(b)).onError(_ -> done(null));
+    }
+    catch (e)
+    {
+      done(null);
+    }
+  }
+
   public static function fromBGRA(bgra:Bytes, w:Int, h:Int):BitmapData
   {
     var argb = new ByteArray(w * h * 4);

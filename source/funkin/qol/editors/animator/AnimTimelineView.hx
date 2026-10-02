@@ -649,8 +649,14 @@ class AnimTimelineView extends FlxGroup
 
     if (mx < gridX)
     {
-      // Label column: toggles, select, rename (double-click), drag to reorder.
+      // Label column: toggles, select, rename (double-click), drag to reorder, right-click menu.
       var layer = sym.layers[row];
+      if (FlxG.mouse.justPressedRight)
+      {
+        ed.selectLayer(row);
+        ed.openLayerMenu(row);
+        return true;
+      }
       if (mx >= x + LABEL_W - 60 && mx < x + LABEL_W - 42) ed.toggleLayer(row, 'visible');
       else if (mx >= x + LABEL_W - 42 && mx < x + LABEL_W - 24) ed.toggleLayer(row, 'locked');
       else if (mx >= x + LABEL_W - 24) ed.toggleLayer(row, 'outline');

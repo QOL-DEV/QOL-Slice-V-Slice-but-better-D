@@ -3,6 +3,7 @@ package funkin.qol.editors.animator;
 #if FEATURE_HAXEUI
 import funkin.qol.editors.animator.AnimData;
 import funkin.qol.util.QOLFilePicker;
+import funkin.qol.util.QOLFilePicker.QOLPickedFile;
 import haxe.io.Bytes;
 import openfl.display.BitmapData;
 import openfl.geom.Matrix;
@@ -30,24 +31,94 @@ typedef SparrowFrame =
 class AnimImport
 {
   //
+  // Dropped files
+  //
+
+  public static final IMAGE_EXTS:Array<String> = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'tga'];
+
+  /**
+   * Files dropped onto the Animator: each kind goes to its import. `at` is where they were dropped (timeline
+   * coordinates), or null if not over the stage.
+   */
+  public static function importDropped(ed:AnimatorState, files:Array<QOLPickedFile>, at:Null<Point>):Void
+  {
+    var exts = [for (f in files) QOLFilePicker.ext(f.name)];
+    inline function has(list:Array<String>):Bool
+      return Lambda.exists(exts, e -> list.contains(e));
+    var names = [for (f in files) haxe.io.Path.withoutDirectory(f.name).toLowerCase()];
+    if (has(['fla', 'xfl']) || names.contains('domdocument.xml')) importFlaFiles(ed, files);
+    else if (names.contains('animation.json')) importAnimateAtlasFiles(ed, files);
+    else if (has(['psd'])) importPsdFiles(ed, files);
+    else if (has(['xml']) && has(['png'])) importSparrowFiles(ed, files);
+    else if (has(['zip'])) importPsdFiles(ed, files);
+    else if (has(['gif'])) importVideoFiles(ed, [Lambda.find(files, f -> QOLFilePicker.ext(f.name) == 'gif')]);
+    else if (Lambda.exists(exts, e -> AnimMedia.VIDEO_EXTS.contains(e) && !AnimMedia.AUDIO_EXTS.contains(e)))
+      importVideoFiles(ed, [Lambda.find(files, f -> AnimMedia.VIDEO_EXTS.contains(QOLFilePicker.ext(f.name)))]);
+    else if (has(AnimMedia.AUDIO_EXTS))
+    {
+      for (f in files)
+        if (AnimMedia.AUDIO_EXTS.contains(QOLFilePicker.ext(f.name))) importAudioFiles(ed, [f]);
+    }
+    else if (has(IMAGE_EXTS))
+    {
+      var images = [for (f in files) if (IMAGE_EXTS.contains(QOLFilePicker.ext(f.name))) f];
+      images.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
+      decodeAll(images, bmps -> {
+        if (bmps.length == 0)
+        {
+          ed.alert('Could not read', 'Those images could not be opened.');
+          return;
+        }
+        // One image goes where it was dropped; several become frames.
+        if (bmps.length == 1) ed.placeImage(bmps[0].bmp, bmps[0].name, at);
+        else
+          addBitmapFrames(ed, bmps[0].name, [for (b in bmps) b.bmp]);
+      });
+    }
+    else
+      ed.alert('Can\'t import that', 'Drop images, PSDs, .fla files, sprite sheets (.xml + .png), Animate atlases, sounds, videos or GIFs.');
+  }
+
+  static function decodeAll(files:Array<QOLPickedFile>, done:Array<{name:String, bmp:BitmapData}>->Void):Void
+  {
+    var out:Array<{name:String, bmp:BitmapData}> = [];
+    function next(i:Int)
+    {
+      if (i >= files.length)
+      {
+        done(out);
+        return;
+      }
+      AnimIO.decodeImage(files[i].bytes, b -> {
+        if (b != null) out.push({name: haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(files[i].name)), bmp: b});
+        next(i + 1);
+      });
+    }
+    next(0);
+  }
+
+  //
   // Library image
   //
 
   public static function importLibraryImage(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Images', ['png'], true, files -> {
-      var count = 0;
-      ed.doc.checkpoint();
-      for (f in files)
-      {
-        var bmp = AnimIO.decodePNG(f.bytes);
-        if (bmp == null) continue;
-        ed.doc.addBitmap(bmp, haxe.io.Path.withoutExtension(f.name), true);
-        count++;
-      }
-      ed.doc.changed();
-      ed.notify('Imported', '$count image(s) added to the Library. Select one there and click "Place on stage".');
-    });
+    QOLFilePicker.open('Images', ['png'], true, files -> importLibraryImageFiles(ed, files));
+  }
+
+  public static function importLibraryImageFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var count = 0;
+    ed.doc.checkpoint();
+    for (f in files)
+    {
+      var bmp = AnimIO.decodePNG(f.bytes);
+      if (bmp == null) continue;
+      ed.doc.addBitmap(bmp, haxe.io.Path.withoutExtension(f.name), true);
+      count++;
+    }
+    ed.doc.changed();
+    ed.notify('Imported', '$count image(s) added to the Library. Select one there and click "Place on stage".');
   }
 
   //
@@ -119,40 +190,43 @@ class AnimImport
 
   public static function importSparrow(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Sparrow spritesheet (pick the .xml and the .png)', ['xml', 'png'], true, files -> {
-      var xmlFile = Lambda.find(files, f -> QOLFilePicker.ext(f.name) == 'xml');
-      if (xmlFile == null)
-      {
-        ed.alert('No XML', 'Pick the spritesheet\'s .xml file (and its .png).');
-        return;
-      }
-      var pngBytes:Null<Bytes> = null;
-      var png = Lambda.find(files, f -> QOLFilePicker.ext(f.name) == 'png');
-      if (png != null) pngBytes = png.bytes;
-      else
-      {
-        var root = Xml.parse(xmlFile.bytes.toString()).firstElement();
-        var imagePath = root?.get('imagePath') ?? (haxe.io.Path.withoutExtension(xmlFile.name) + '.png');
-        pngBytes = QOLFilePicker.sibling(xmlFile, haxe.io.Path.withoutDirectory(imagePath));
-      }
-      if (pngBytes == null)
-      {
-        ed.alert('No PNG', 'Pick both the .xml and the .png of the spritesheet.');
-        return;
-      }
-      var atlas = AnimIO.decodePNG(pngBytes);
-      if (atlas == null)
-      {
-        ed.alert('Bad PNG', 'The spritesheet image could not be read.');
-        return;
-      }
-      var frames = parseSparrow(xmlFile.bytes.toString());
-      var doc = framesToDoc(haxe.io.Path.withoutExtension(xmlFile.name), [for (f in frames) {anim: animName(f.name), bmp: cutFrame(atlas, f)}], ed.doc.project.fps);
-      atlas.dispose();
-      ed.setDocument(doc);
-      ed.notify('Imported', '${frames.length} frames. Each animation is a symbol with a bitmap layer you can paint on; '
-        + 'the Scene has a frame label for each one.');
-    });
+    QOLFilePicker.open('Sparrow spritesheet (pick the .xml and the .png)', ['xml', 'png'], true, files -> importSparrowFiles(ed, files));
+  }
+
+  public static function importSparrowFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var xmlFile = Lambda.find(files, f -> QOLFilePicker.ext(f.name) == 'xml');
+    if (xmlFile == null)
+    {
+      ed.alert('No XML', 'Pick the spritesheet\'s .xml file (and its .png).');
+      return;
+    }
+    var pngBytes:Null<Bytes> = null;
+    var png = Lambda.find(files, f -> QOLFilePicker.ext(f.name) == 'png');
+    if (png != null) pngBytes = png.bytes;
+    else
+    {
+      var root = Xml.parse(xmlFile.bytes.toString()).firstElement();
+      var imagePath = root?.get('imagePath') ?? (haxe.io.Path.withoutExtension(xmlFile.name) + '.png');
+      pngBytes = QOLFilePicker.sibling(xmlFile, haxe.io.Path.withoutDirectory(imagePath));
+    }
+    if (pngBytes == null)
+    {
+      ed.alert('No PNG', 'Pick both the .xml and the .png of the spritesheet.');
+      return;
+    }
+    var atlas = AnimIO.decodePNG(pngBytes);
+    if (atlas == null)
+    {
+      ed.alert('Bad PNG', 'The spritesheet image could not be read.');
+      return;
+    }
+    var frames = parseSparrow(xmlFile.bytes.toString());
+    var doc = framesToDoc(haxe.io.Path.withoutExtension(xmlFile.name), [for (f in frames) {anim: animName(f.name), bmp: cutFrame(atlas, f)}], ed.doc.project.fps);
+    atlas.dispose();
+    ed.setDocument(doc);
+    ed.notify('Imported', '${frames.length} frames. Each animation is a symbol with a bitmap layer you can paint on; '
+      + 'the Scene has a frame label for each one.');
   }
 
   /**
@@ -233,37 +307,43 @@ class AnimImport
 
   public static function importSequence(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('PNG sequence (pick every frame)', ['png'], true, files -> {
-      files.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
-      var bmps = [for (f in files) AnimIO.decodePNG(f.bytes)].filter(b -> b != null);
-      if (bmps.length == 0) return;
-      addBitmapFrames(ed, haxe.io.Path.withoutExtension(files[0].name), bmps);
-    });
+    QOLFilePicker.open('PNG sequence (pick every frame)', ['png'], true, files -> importSequenceFiles(ed, files));
+  }
+
+  public static function importSequenceFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    files.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
+    var bmps = [for (f in files) AnimIO.decodePNG(f.bytes)].filter(b -> b != null);
+    if (bmps.length == 0) return;
+    addBitmapFrames(ed, haxe.io.Path.withoutExtension(files[0].name), bmps);
   }
 
   public static function importGrid(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Sprite sheet', ['png'], false, files -> {
-      var sheet = AnimIO.decodePNG(files[0].bytes);
-      if (sheet == null) return;
-      var cols = 4, rows = 1, count = 0;
-      AnimExport.formDialog('Sprite sheet grid', 'Import', form -> {
-        form.note('${sheet.width} x ${sheet.height} pixels. How is it divided?');
-        form.number('Columns', () -> cols, v -> cols = Std.int(v), 1, 256, 1, 0);
-        form.number('Rows', () -> rows, v -> rows = Std.int(v), 1, 256, 1, 0);
-        form.number('Frames (0 = all)', () -> count, v -> count = Std.int(v), 0, 65536, 1, 0);
-      }, () -> {
-        var cw = Std.int(sheet.width / cols), ch = Std.int(sheet.height / rows);
-        var total = count > 0 ? Std.int(Math.min(count, cols * rows)) : cols * rows;
-        var bmps:Array<BitmapData> = [];
-        for (i in 0...total)
-        {
-          var b = new BitmapData(cw, ch, true, 0);
-          b.copyPixels(sheet, new Rectangle((i % cols) * cw, Std.int(i / cols) * ch, cw, ch), new Point(0, 0));
-          bmps.push(b);
-        }
-        addBitmapFrames(ed, haxe.io.Path.withoutExtension(files[0].name), bmps);
-      });
+    QOLFilePicker.open('Sprite sheet', ['png'], false, files -> importGridFiles(ed, files));
+  }
+
+  public static function importGridFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var sheet = AnimIO.decodePNG(files[0].bytes);
+    if (sheet == null) return;
+    var cols = 4, rows = 1, count = 0;
+    AnimExport.formDialog('Sprite sheet grid', 'Import', form -> {
+      form.note('${sheet.width} x ${sheet.height} pixels. How is it divided?');
+      form.number('Columns', () -> cols, v -> cols = Std.int(v), 1, 256, 1, 0);
+      form.number('Rows', () -> rows, v -> rows = Std.int(v), 1, 256, 1, 0);
+      form.number('Frames (0 = all)', () -> count, v -> count = Std.int(v), 0, 65536, 1, 0);
+    }, () -> {
+      var cw = Std.int(sheet.width / cols), ch = Std.int(sheet.height / rows);
+      var total = count > 0 ? Std.int(Math.min(count, cols * rows)) : cols * rows;
+      var bmps:Array<BitmapData> = [];
+      for (i in 0...total)
+      {
+        var b = new BitmapData(cw, ch, true, 0);
+        b.copyPixels(sheet, new Rectangle((i % cols) * cw, Std.int(i / cols) * ch, cw, ch), new Point(0, 0));
+        bmps.push(b);
+      }
+      addBitmapFrames(ed, haxe.io.Path.withoutExtension(files[0].name), bmps);
     });
   }
 
@@ -331,49 +411,52 @@ class AnimImport
 
   public static function importAnimateAtlas(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Animate atlas (pick Animation.json, spritemap*.json and spritemap*.png)', ['json', 'png'], true, files -> {
-      var animFile = Lambda.find(files, x -> x.name.toLowerCase() == 'animation.json');
-      if (animFile == null)
+    QOLFilePicker.open('Animate atlas (pick Animation.json, spritemap*.json and spritemap*.png)', ['json', 'png'], true, files -> importAnimateAtlasFiles(ed, files));
+  }
+
+  public static function importAnimateAtlasFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var animFile = Lambda.find(files, x -> x.name.toLowerCase() == 'animation.json');
+    if (animFile == null)
+    {
+      ed.alert('No Animation.json', 'Pick the atlas\'s Animation.json together with its spritemap files.');
+      return;
+    }
+    // Spritemaps: pick them, or (desktop) they're found next to Animation.json.
+    var maps:Array<{json:Dynamic, png:BitmapData}> = [];
+    var i = 1;
+    while (i < 32)
+    {
+      var jn = 'spritemap$i.json', pn = 'spritemap$i.png';
+      var jb = Lambda.find(files, x -> x.name.toLowerCase() == jn)?.bytes ?? QOLFilePicker.sibling(animFile, jn);
+      var pb = Lambda.find(files, x -> x.name.toLowerCase() == pn)?.bytes ?? QOLFilePicker.sibling(animFile, pn);
+      if (jb == null || pb == null)
       {
-        ed.alert('No Animation.json', 'Pick the atlas\'s Animation.json together with its spritemap files.');
-        return;
-      }
-      // Spritemaps: pick them, or (desktop) they're found next to Animation.json.
-      var maps:Array<{json:Dynamic, png:BitmapData}> = [];
-      var i = 1;
-      while (i < 32)
-      {
-        var jn = 'spritemap$i.json', pn = 'spritemap$i.png';
-        var jb = Lambda.find(files, x -> x.name.toLowerCase() == jn)?.bytes ?? QOLFilePicker.sibling(animFile, jn);
-        var pb = Lambda.find(files, x -> x.name.toLowerCase() == pn)?.bytes ?? QOLFilePicker.sibling(animFile, pn);
-        if (jb == null || pb == null)
+        if (i == 1)
         {
-          if (i == 1)
-          {
-            // Some atlases use "spritemap.json".
-            jb = Lambda.find(files, x -> x.name.toLowerCase() == 'spritemap.json')?.bytes ?? QOLFilePicker.sibling(animFile, 'spritemap.json');
-            pb = Lambda.find(files, x -> x.name.toLowerCase() == 'spritemap.png')?.bytes ?? QOLFilePicker.sibling(animFile, 'spritemap.png');
-            if (jb == null || pb == null) break;
-          }
-          else
-            break;
+          // Some atlases use "spritemap.json".
+          jb = Lambda.find(files, x -> x.name.toLowerCase() == 'spritemap.json')?.bytes ?? QOLFilePicker.sibling(animFile, 'spritemap.json');
+          pb = Lambda.find(files, x -> x.name.toLowerCase() == 'spritemap.png')?.bytes ?? QOLFilePicker.sibling(animFile, 'spritemap.png');
+          if (jb == null || pb == null) break;
         }
-        var text = jb.toString();
-        if (text.charCodeAt(0) == 0xFEFF) text = text.substr(1);
-        maps.push({json: haxe.Json.parse(text), png: AnimIO.decodePNG(pb)});
-        i++;
+        else
+          break;
       }
-      if (maps.length == 0)
-      {
-        ed.alert('No spritemap', 'Pick the spritemap .json and .png files too.');
-        return;
-      }
-      var text = animFile.bytes.toString();
+      var text = jb.toString();
       if (text.charCodeAt(0) == 0xFEFF) text = text.substr(1);
-      var doc = animateToDoc(haxe.Json.parse(text), maps, ed.doc.project.fps);
-      ed.setDocument(doc);
-      ed.notify('Imported', 'Animate atlas with ${doc.project.symbols.length - 1} symbols.');
-    });
+      maps.push({json: haxe.Json.parse(text), png: AnimIO.decodePNG(pb)});
+      i++;
+    }
+    if (maps.length == 0)
+    {
+      ed.alert('No spritemap', 'Pick the spritemap .json and .png files too.');
+      return;
+    }
+    var text = animFile.bytes.toString();
+    if (text.charCodeAt(0) == 0xFEFF) text = text.substr(1);
+    var doc = animateToDoc(haxe.Json.parse(text), maps, ed.doc.project.fps);
+    ed.setDocument(doc);
+    ed.notify('Imported', 'Animate atlas with ${doc.project.symbols.length - 1} symbols.');
   }
 
   public static function animateToDoc(anim:Dynamic, maps:Array<{json:Dynamic, png:BitmapData}>, fps:Float):AnimDoc
@@ -629,158 +712,170 @@ class AnimImport
 
   public static function importFla(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Adobe Animate file (.fla, or DOMDocument.xml from an .xfl folder)', ['fla', 'xfl', 'xml'], true, files -> {
-      try
-      {
-        var doc = XFLFile.read(files);
-        ed.setDocument(doc);
-        ed.notify('Imported', '${doc.project.name}: ${doc.project.symbols.length - 1} symbols.');
-      }
-      catch (e)
-      {
-        ed.alert('Could not import', Std.string(e));
-      }
-    });
+    QOLFilePicker.open('Adobe Animate file (.fla, or DOMDocument.xml from an .xfl folder)', ['fla', 'xfl', 'xml'], true, files -> importFlaFiles(ed, files));
+  }
+
+  public static function importFlaFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    try
+    {
+      var doc = XFLFile.read(files);
+      ed.setDocument(doc);
+      ed.notify('Imported', '${doc.project.name}: ${doc.project.symbols.length - 1} symbols.');
+    }
+    catch (e)
+    {
+      ed.alert('Could not import', Std.string(e));
+    }
   }
 
   public static function importPsd(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Photoshop / ToonSquid / ibisPaint (.psd, or a .zip of PSDs)', ['psd', 'zip'], true, files -> {
-      var named:Array<{name:String, bytes:Bytes}> = [];
-      try
+    QOLFilePicker.open('Photoshop / ToonSquid / ibisPaint (.psd, or a .zip of PSDs)', ['psd', 'zip'], true, files -> importPsdFiles(ed, files));
+  }
+
+  public static function importPsdFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var named:Array<{name:String, bytes:Bytes}> = [];
+    try
+    {
+      for (f in files)
       {
-        for (f in files)
+        if (QOLFilePicker.ext(f.name) == 'zip')
         {
-          if (QOLFilePicker.ext(f.name) == 'zip')
-          {
-            for (e in funkin.qol.util.QOLZip.read(f.bytes))
-              if (QOLFilePicker.ext(e.name) == 'psd') named.push({name: haxe.io.Path.withoutDirectory(e.name), bytes: e.data});
-          }
-          else
-            named.push({name: f.name, bytes: f.bytes});
-        }
-        if (named.length == 0) throw 'No .psd files found.';
-        named.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
-        var psds = [for (n in named) PSDCodec.read(n.bytes)];
-        var title = haxe.io.Path.withoutExtension(named[0].name);
-        function finish(mode:String)
-        {
-          try
-          {
-            var doc = PSDFile.toDoc(psds, title, ed.doc.project.fps, mode);
-            ed.setDocument(doc);
-            var how = switch (mode)
-            {
-              case PSDFile.MODE_TIMELINE: 'its frame animation';
-              case PSDFile.MODE_GROUPS: 'one frame per group';
-              case PSDFile.MODE_FILES: 'one frame per file';
-              default: 'its layers';
-            };
-            ed.notify('Imported', '$title: ${AnimData.symbolLength(doc.main)} frame(s), ${doc.main.layers.length} layer(s), from $how.');
-          }
-          catch (e)
-          {
-            ed.alert('Could not import', Std.string(e));
-          }
-        }
-        var mode = PSDFile.suggestedMode(psds);
-        if (mode == PSDFile.MODE_LAYERS && PSDFile.topGroups(psds[0]) >= 2)
-        {
-          // Groups might be frames (a common way to keep animation frames in a PSD).
-          var choice = PSDFile.MODE_GROUPS;
-          AnimExport.formDialog('Import PSD', 'Import', form -> {
-            form.note('This PSD has ${PSDFile.topGroups(psds[0])} groups at the top. How should it come in?');
-            form.dropdown('Import as', () -> [PSDFile.MODE_GROUPS, PSDFile.MODE_LAYERS], () -> choice, v -> choice = v,
-              () -> ['Each group is one frame', 'One frame with all the layers']);
-          }, () -> finish(choice));
+          for (e in funkin.qol.util.QOLZip.read(f.bytes))
+            if (QOLFilePicker.ext(e.name) == 'psd') named.push({name: haxe.io.Path.withoutDirectory(e.name), bytes: e.data});
         }
         else
-          finish(mode);
+          named.push({name: f.name, bytes: f.bytes});
       }
-      catch (e)
+      if (named.length == 0) throw 'No .psd files found.';
+      named.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
+      var psds = [for (n in named) PSDCodec.read(n.bytes)];
+      var title = haxe.io.Path.withoutExtension(named[0].name);
+      function finish(mode:String)
       {
-        ed.alert('Could not import', Std.string(e));
+        try
+        {
+          var doc = PSDFile.toDoc(psds, title, ed.doc.project.fps, mode);
+          ed.setDocument(doc);
+          var how = switch (mode)
+          {
+            case PSDFile.MODE_TIMELINE: 'its frame animation';
+            case PSDFile.MODE_GROUPS: 'one frame per group';
+            case PSDFile.MODE_FILES: 'one frame per file';
+            default: 'its layers';
+          };
+          ed.notify('Imported', '$title: ${AnimData.symbolLength(doc.main)} frame(s), ${doc.main.layers.length} layer(s), from $how.');
+        }
+        catch (e)
+        {
+          ed.alert('Could not import', Std.string(e));
+        }
       }
-    });
+      var mode = PSDFile.suggestedMode(psds);
+      if (mode == PSDFile.MODE_LAYERS && PSDFile.topGroups(psds[0]) >= 2)
+      {
+        // Groups might be frames (a common way to keep animation frames in a PSD).
+        var choice = PSDFile.MODE_GROUPS;
+        AnimExport.formDialog('Import PSD', 'Import', form -> {
+          form.note('This PSD has ${PSDFile.topGroups(psds[0])} groups at the top. How should it come in?');
+          form.dropdown('Import as', () -> [PSDFile.MODE_GROUPS, PSDFile.MODE_LAYERS], () -> choice, v -> choice = v,
+            () -> ['Each group is one frame', 'One frame with all the layers']);
+        }, () -> finish(choice));
+      }
+      else
+        finish(mode);
+    }
+    catch (e)
+    {
+      ed.alert('Could not import', Std.string(e));
+    }
   }
 
   public static function importAudio(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Sound (MP3, OGG, WAV, FLAC, M4A, Opus, WMA, AIFF... or a video\'s soundtrack)', AnimMedia.AUDIO_EXTS.concat(AnimMedia.VIDEO_EXTS), false, files -> {
-      var f = files[0];
-      var name = haxe.io.Path.withoutExtension(f.name);
-      var cancel:Void->Void = () -> {};
-      var progress = ed.showProgress('Loading ${f.name}', 'Decoding the sound...', () -> cancel());
-      cancel = AnimMedia.decodeAudio(f, a -> {
-        progress.close();
-        ed.importSound(name, a);
-      }, err -> {
-        progress.close();
-        if (err != 'Cancelled') ed.alert('Could not load the sound', err);
-      }, p -> progress.update(p));
-    });
+    QOLFilePicker.open('Sound (MP3, OGG, WAV, FLAC, M4A, Opus, WMA, AIFF... or a video\'s soundtrack)', AnimMedia.AUDIO_EXTS.concat(AnimMedia.VIDEO_EXTS), false, files -> importAudioFiles(ed, files));
+  }
+
+  public static function importAudioFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var f = files[0];
+    var name = haxe.io.Path.withoutExtension(f.name);
+    var cancel:Void->Void = () -> {};
+    var progress = ed.showProgress('Loading ${f.name}', 'Decoding the sound...', () -> cancel());
+    cancel = AnimMedia.decodeAudio(f, a -> {
+      progress.close();
+      ed.importSound(name, a);
+    }, err -> {
+      progress.close();
+      if (err != 'Cancelled') ed.alert('Could not load the sound', err);
+    }, p -> progress.update(p));
   }
 
   public static function importVideo(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Video or GIF (MP4, MOV, WebM, MKV, AVI, WMV, FLV, MPEG, 3GP, OGV, GIF...)', AnimMedia.VIDEO_EXTS, false, files -> {
-      var f = files[0];
-      var isGif = QOLFilePicker.ext(f.name) == 'gif';
-      var doc = ed.doc;
-      var fps = doc.project.fps;
-      var size = 'stage';
-      var seconds = isGif ? 60.0 : 10.0;
-      var withAudio = !isGif;
-      AnimExport.formDialog(isGif ? 'Import GIF' : 'Import Video', 'Import', form -> {
-        form.note(f.name);
-        form.number('Frame rate', () -> fps, v -> fps = Math.max(1, Math.min(60, v)), 1, 60, 1, 0);
-        form.dropdown('Size', () -> ['stage', 'half', 'full'], () -> size, v -> size = v,
-          () -> ['Fit the stage (${doc.project.width}x${doc.project.height})', 'Half the stage', 'Original size (up to 1920)']);
-        form.number('Seconds to import', () -> seconds, v -> seconds = Math.max(0.1, v), 0.1, 3600, 1, 1);
-        if (!isGif) form.check('Also import its sound', () -> withAudio, v -> withAudio = v);
-        form.note('The frames go on a new paint layer at the playhead${isGif ? '' : ', the sound on a sound layer'}. '
-          + (isGif ? '' : 'Videos are played through once to read them, so this takes about as long as the clip. ')
-          + 'Long or big videos use lots of memory.');
-      }, () -> {
-        var maxW = doc.project.width, maxH = doc.project.height;
-        switch (size)
+    QOLFilePicker.open('Video or GIF (MP4, MOV, WebM, MKV, AVI, WMV, FLV, MPEG, 3GP, OGV, GIF...)', AnimMedia.VIDEO_EXTS, false, files -> importVideoFiles(ed, files));
+  }
+
+  public static function importVideoFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
+  {
+    var f = files[0];
+    var isGif = QOLFilePicker.ext(f.name) == 'gif';
+    var doc = ed.doc;
+    var fps = doc.project.fps;
+    var size = 'stage';
+    var seconds = isGif ? 60.0 : 10.0;
+    var withAudio = !isGif;
+    AnimExport.formDialog(isGif ? 'Import GIF' : 'Import Video', 'Import', form -> {
+      form.note(f.name);
+      form.number('Frame rate', () -> fps, v -> fps = Math.max(1, Math.min(60, v)), 1, 60, 1, 0);
+      form.dropdown('Size', () -> ['stage', 'half', 'full'], () -> size, v -> size = v,
+        () -> ['Fit the stage (${doc.project.width}x${doc.project.height})', 'Half the stage', 'Original size (up to 1920)']);
+      form.number('Seconds to import', () -> seconds, v -> seconds = Math.max(0.1, v), 0.1, 3600, 1, 1);
+      if (!isGif) form.check('Also import its sound', () -> withAudio, v -> withAudio = v);
+      form.note('The frames go on a new paint layer at the playhead${isGif ? '' : ', the sound on a sound layer'}. '
+        + (isGif ? '' : 'Videos are played through once to read them, so this takes about as long as the clip. ')
+        + 'Long or big videos use lots of memory.');
+    }, () -> {
+      var maxW = doc.project.width, maxH = doc.project.height;
+      switch (size)
+      {
+        case 'half':
+          maxW = Std.int(maxW / 2);
+          maxH = Std.int(maxH / 2);
+        case 'full':
+          maxW = 1920;
+          maxH = 1920;
+        default:
+      }
+      var opts:AnimMedia.VideoOptions = {
+        fps: fps,
+        maxWidth: Std.int(Math.max(16, maxW)),
+        maxHeight: Std.int(Math.max(16, maxH)),
+        maxSeconds: seconds,
+        withAudio: withAudio
+      };
+      var cancel:Void->Void = () -> {};
+      var progress = ed.showProgress('Importing ${f.name}', isGif ? 'Reading the GIF...' : 'Reading the video (it plays through once, silently)...',
+        () -> cancel());
+      var start = ed.frame;
+      cancel = AnimMedia.decodeVideo(f, opts, v -> {
+        progress.close();
+        if (v.frames.length == 0 && v.audio == null)
         {
-          case 'half':
-            maxW = Std.int(maxW / 2);
-            maxH = Std.int(maxH / 2);
-          case 'full':
-            maxW = 1920;
-            maxH = 1920;
-          default:
+          ed.alert('Nothing imported', 'No frames could be read from ${f.name}.');
+          return;
         }
-        var opts:AnimMedia.VideoOptions = {
-          fps: fps,
-          maxWidth: Std.int(Math.max(16, maxW)),
-          maxHeight: Std.int(Math.max(16, maxH)),
-          maxSeconds: seconds,
-          withAudio: withAudio
-        };
-        var cancel:Void->Void = () -> {};
-        var progress = ed.showProgress('Importing ${f.name}', isGif ? 'Reading the GIF...' : 'Reading the video (it plays through once, silently)...',
-          () -> cancel());
-        var start = ed.frame;
-        cancel = AnimMedia.decodeVideo(f, opts, v -> {
-          progress.close();
-          if (v.frames.length == 0 && v.audio == null)
-          {
-            ed.alert('Nothing imported', 'No frames could be read from ${f.name}.');
-            return;
-          }
-          var name = haxe.io.Path.withoutExtension(f.name);
-          var empty = doc.project.symbols.length == 1 && AnimData.symbolLength(doc.main) <= 1;
-          if (empty) doc.project.fps = fps;
-          if (v.frames.length > 0) addBitmapFrames(ed, name, v.frames);
-          if (v.audio != null && v.audio.pcm.length > 0) ed.importSound(name, v.audio, start);
-        }, err -> {
-          progress.close();
-          if (err != 'Cancelled') ed.alert('Could not import', err);
-        }, p -> progress.update(p));
-      });
+        var name = haxe.io.Path.withoutExtension(f.name);
+        var empty = doc.project.symbols.length == 1 && AnimData.symbolLength(doc.main) <= 1;
+        if (empty) doc.project.fps = fps;
+        if (v.frames.length > 0) addBitmapFrames(ed, name, v.frames);
+        if (v.audio != null && v.audio.pcm.length > 0) ed.importSound(name, v.audio, start);
+      }, err -> {
+        progress.close();
+        if (err != 'Cancelled') ed.alert('Could not import', err);
+      }, p -> progress.update(p));
     });
   }
 }

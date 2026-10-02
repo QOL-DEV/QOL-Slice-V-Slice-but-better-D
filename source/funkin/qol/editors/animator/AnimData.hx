@@ -66,6 +66,11 @@ typedef AnimBitmapInfo =
    * True for images in the library (placed as elements); false for the canvases of bitmap layers.
    */
   var ?library:Bool;
+
+  /**
+   * Smooth when scaled (default true).
+   */
+  var ?smooth:Bool;
 }
 
 typedef AnimLayer =
@@ -74,9 +79,30 @@ typedef AnimLayer =
 
   /**
    * 'vector' (shapes, symbols and placed bitmaps), 'bitmap' (a paintable canvas per keyframe), 'camera' (the main
-   * timeline's camera) or 'audio' (sounds).
+   * timeline's camera), 'audio' (sounds) or 'folder' (holds the layers below it that are nested deeper).
    */
   var kind:String;
+
+  /**
+   * How deeply nested the layer is (0 = top level). A folder or mask layer holds the layers right below it that are
+   * nested deeper than it.
+   */
+  var ?depth:Int;
+
+  /**
+   * Mask layer: its shapes cut out the layers nested under it (only their parts inside the mask show).
+   */
+  var ?mask:Bool;
+
+  /**
+   * Folders and masks: children hidden in the timeline.
+   */
+  var ?collapsed:Bool;
+
+  /**
+   * Stays put when the camera moves (like a HUD).
+   */
+  var ?fixed:Bool;
 
   var visible:Bool;
   var locked:Bool;
@@ -141,6 +167,13 @@ typedef AnimKeyframe =
    * Camera layers: where the camera looks at this keyframe.
    */
   var ?camera:AnimCamera;
+
+  /**
+   * Layer effects from this keyframe on: blend mode and filters for the whole layer.
+   */
+  var ?blend:String;
+
+  var ?filters:Array<AnimFilter>;
 }
 
 /**
@@ -168,12 +201,30 @@ typedef AnimCamera =
 
 typedef AnimTween =
 {
+  /**
+   * A named ease (see QOLEase), used when there's no `curve` or `accel`.
+   */
   var ease:String;
 
   /**
    * Extra full turns while tweening (positive = clockwise).
    */
   var ?spins:Int;
+
+  /**
+   * Animate's classic ease: -100 (ease in) to 100 (ease out).
+   */
+  var ?accel:Float;
+
+  /**
+   * A custom ease curve: cubic Bezier points x0 y0 x1 y1 ... from (0, 0) to (1, 1) (control, control, point...).
+   */
+  var ?curve:Array<Float>;
+
+  /**
+   * Shape tween: shapes morph into the next keyframe's shapes.
+   */
+  var ?shape:Bool;
 }
 
 typedef AnimElement =
@@ -200,6 +251,12 @@ typedef AnimElement =
 
   // Color effect.
   var ?alpha:Float;
+
+  /**
+   * Advanced color: red, green, blue, alpha multipliers then offsets (overrides alpha, tint and brightness).
+   */
+  var ?ct:Array<Float>;
+
   var ?tint:Int;
   var ?tintAmount:Float;
   var ?brightness:Float;
@@ -213,11 +270,16 @@ typedef AnimElement =
   var ?symbol:String;
 
   /**
-   * 'loop', 'once' or 'single'.
+   * 'loop', 'once', 'single', 'loopReverse' or 'onceReverse'.
    */
   var ?loop:String;
 
   var ?firstFrame:Int;
+
+  /**
+   * Last frame to play (inclusive; null = the symbol's end).
+   */
+  var ?lastFrame:Int;
 
   // type == 'bitmap'
   var ?bitmap:String;
@@ -230,6 +292,11 @@ typedef AnimElement =
   var ?boxWidth:Float;
 
   var ?name:String;
+
+  /**
+   * Hidden instances aren't drawn (Animate's "Visible" box).
+   */
+  var ?hidden:Bool;
 }
 
 typedef AnimPath =
@@ -247,16 +314,88 @@ typedef AnimPath =
   var ?width:Float;
 
   /**
+   * Stroke ends ('round', 'square' or 'none') and corners ('round', 'miter' or 'bevel'). Default round.
+   */
+  var ?caps:String;
+
+  var ?joints:String;
+
+  /**
+   * Stroke width doesn't change when scaled.
+   */
+  var ?hairline:Bool;
+
+  /**
+   * 'nonzero' or 'evenodd' (how overlapping outlines fill). Default: nonzero for one outline, evenodd for several.
+   */
+  var ?winding:String;
+
+  /**
+   * Gradient fill (instead of `fill`).
+   */
+  var ?gradient:AnimGradient;
+
+  /**
+   * Image fill (instead of `fill`).
+   */
+  var ?bitmapFill:AnimBitmapFill;
+
+  /**
    * Commands: 0 x y = move, 1 x y = line, 2 cx cy x y = quadratic curve, 3 c1x c1y c2x c2y x y = cubic curve,
    * 4 = close.
    */
   var d:Array<Float>;
 }
 
+typedef AnimGradient =
+{
+  /**
+   * 'linear' or 'radial'.
+   */
+  var type:String;
+
+  /**
+   * ARGB colors and their positions (0..255).
+   */
+  var colors:Array<Int>;
+
+  var ratios:Array<Int>;
+
+  /**
+   * Maps the gradient box (-819.2..819.2 on both axes, like Flash) into the shape: a b c d tx ty.
+   */
+  var matrix:Array<Float>;
+
+  /**
+   * 'pad', 'reflect' or 'repeat'.
+   */
+  var ?spread:String;
+
+  /**
+   * Radial gradients: where the center is (-1..1).
+   */
+  var ?focal:Float;
+
+  var ?linearRGB:Bool;
+}
+
+typedef AnimBitmapFill =
+{
+  var bitmap:String;
+
+  /**
+   * Image pixels -> shape: a b c d tx ty.
+   */
+  var matrix:Array<Float>;
+
+  var ?clip:Bool;
+  var ?smooth:Bool;
+}
+
 typedef AnimFilter =
 {
   /**
-   * 'blur', 'glow', 'shadow' or 'adjust'.
+   * 'blur', 'glow', 'shadow', 'adjust' or 'bevel'.
    */
   var type:String;
 
@@ -270,6 +409,10 @@ typedef AnimFilter =
   var ?inner:Bool;
   var ?knockout:Bool;
   var ?quality:Int;
+
+  // 'bevel'
+  var ?highlight:Int;
+  var ?shadowColor:Int;
 
   // 'adjust'
   var ?brightness:Float;

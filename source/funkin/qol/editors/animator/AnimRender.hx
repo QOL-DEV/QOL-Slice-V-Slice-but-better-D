@@ -1,7 +1,6 @@
 package funkin.qol.editors.animator;
 
 import funkin.qol.editors.animator.AnimData;
-import funkin.qol.util.QOLEase;
 import openfl.display.Bitmap;
 import openfl.display.BlendMode;
 import openfl.display.DisplayObject;
@@ -44,6 +43,18 @@ typedef AnimRenderOptions =
    * Leave the camera out (exports).
    */
   var ?noCamera:Bool;
+
+  /**
+   * A camera applied outside the render (the editor's camera view): layers attached to the camera cancel it out.
+   */
+  var ?outerCamera:Matrix;
+}
+
+typedef CachedShape =
+{
+  var shape:Shape;
+  var sig:Float;
+  var used:Int;
 }
 
 typedef AnimHit =
@@ -78,14 +89,139 @@ class AnimRender
   {
     hits = [];
     opts = opts ?? {};
-    var root = renderSymbol(sym, frame, opts, 0, true);
+    rendering = true;
+    renderCount++;
+    shapeUse = new haxe.ds.ObjectMap();
     var cam = opts.camera;
     if (cam == null && opts.forExport == true && opts.noCamera != true && sym == doc.main) cam = cameraMatrix(sym, frame);
+    // Layers attached to the camera cancel it out.
+    var outer = cam ?? opts.outerCamera;
+    fixedMatrix = null;
+    if (outer != null && sym == doc.main)
+    {
+      fixedMatrix = outer.clone();
+      fixedMatrix.invert();
+    }
+    var root = renderSymbol(sym, frame, opts, 0, true);
+    rendering = false;
+    if (renderCount % 16 == 0) sweepShapes();
     if (cam == null) return root;
     var wrap = new Sprite();
     wrap.addChild(root);
     wrap.transform.matrix = cam;
     return wrap;
+  }
+
+  var rendering:Bool = false;
+  var renderCount:Int = 0;
+  var fixedMatrix:Null<Matrix> = null;
+
+  /**
+   * Drawn shapes kept between renders (drawing big shapes again every frame is slow), by their paths.
+   */
+  var shapeCache = new haxe.ds.ObjectMap<Array<AnimPath>, Array<CachedShape>>();
+
+  var shapeUse = new haxe.ds.ObjectMap<Array<AnimPath>, Int>();
+
+  function sweepShapes():Void
+  {
+    for (key in [for (k in shapeCache.keys()) k])
+    {
+      var list = shapeCache.get(key);
+      var keep = [for (c in list) if (renderCount - c.used < 48) c];
+      for (c in list)
+        if (renderCount - c.used >= 48) c.shape.graphics.clear();
+      if (keep.length == 0) shapeCache.remove(key);
+      else
+        shapeCache.set(key, keep);
+    }
+  }
+
+  /**
+   * Forget every kept shape.
+   */
+  public function clearCache():Void
+  {
+    for (list in shapeCache)
+      for (c in list)
+        c.shape.graphics.clear();
+    shapeCache = new haxe.ds.ObjectMap();
+  }
+
+  static function pathsSignature(paths:Array<AnimPath>, outline:Bool, color:Int):Float
+  {
+    var s:Float = outline ? color + 7 : 3;
+    for (p in paths)
+    {
+      var d = p.d;
+      s = s * 1.0001 + d.length * 31 + (p.fill ?? 5) * 1e-7 + (p.stroke ?? 9) * 3e-7 + (p.width ?? 0) * 13;
+      if (p.gradient != null) for (c in p.gradient.colors)
+        s += c * 1e-8;
+      if (p.gradient != null) for (m in p.gradient.matrix)
+        s += m * 17;
+      if (p.bitmapFill != null) s += p.bitmapFill.bitmap.length * 0.37 + p.bitmapFill.matrix[0] * 7 + p.bitmapFill.matrix[4] * 11;
+      var i = 0;
+      while (i < d.length)
+      {
+        s += d[i] * ((i % 13) + 1);
+        i += 2;
+      }
+    }
+    return s;
+  }
+
+  function shapeFor(paths:Array<AnimPath>, outline:Bool, outlineColor:Int):Shape
+  {
+    if (!rendering)
+    {
+      var shape = new Shape();
+      for (p in paths)
+        AnimGeom.drawPath(shape.graphics, p, outline, outlineColor, doc.getBitmap);
+      return shape;
+    }
+    var sig = pathsSignature(paths, outline, outlineColor);
+    var list = shapeCache.get(paths);
+    if (list == null)
+    {
+      list = [];
+      shapeCache.set(paths, list);
+    }
+    var idx = shapeUse.exists(paths) ? shapeUse.get(paths) : 0;
+    shapeUse.set(paths, idx + 1);
+    var c:CachedShape;
+    if (idx < list.length)
+    {
+      c = list[idx];
+      resetLook(c.shape);
+      if (c.sig != sig)
+      {
+        c.shape.graphics.clear();
+        for (p in paths)
+          AnimGeom.drawPath(c.shape.graphics, p, outline, outlineColor, doc.getBitmap);
+        c.sig = sig;
+      }
+    }
+    else
+    {
+      var shape = new Shape();
+      for (p in paths)
+        AnimGeom.drawPath(shape.graphics, p, outline, outlineColor, doc.getBitmap);
+      c = {shape: shape, sig: sig, used: renderCount};
+      list.push(c);
+    }
+    c.used = renderCount;
+    return c.shape;
+  }
+
+  static function resetLook(obj:DisplayObject):Void
+  {
+    if (obj.parent != null) obj.parent.removeChild(obj);
+    obj.transform.colorTransform = new ColorTransform();
+    obj.blendMode = BlendMode.NORMAL;
+    obj.filters = null;
+    obj.alpha = 1;
+    obj.visible = true;
+    obj.mask = null;
   }
 
   /**
@@ -108,12 +244,18 @@ class AnimRender
     var idx = layer.frames.indexOf(key);
     if (idx < 0 || idx + 1 >= layer.frames.length || layer.frames[idx + 1].camera == null) return cam;
     var next = layer.frames[idx + 1].camera;
-    var t = QOLEase.get(key.tween.ease)((frame - key.start) / key.duration);
+    var t = AnimEase.apply(key.tween, (frame - key.start) / key.duration);
     var dr = next.rotation - cam.rotation;
+    while (dr > 180)
+      dr -= 360;
+    while (dr < -180)
+      dr += 360;
+    // Like any tweened object, the camera's size changes evenly (so zooming in speeds up toward the end).
+    var size = lerp(1 / Math.max(0.0001, cam.zoom), 1 / Math.max(0.0001, next.zoom), t);
     return {
       x: lerp(cam.x, next.x, t),
       y: lerp(cam.y, next.y, t),
-      zoom: lerp(cam.zoom, next.zoom, t),
+      zoom: 1 / Math.max(0.0001, size),
       rotation: cam.rotation + (dr + (key.tween.spins ?? 0) * 360) * t
     };
   }
@@ -141,54 +283,107 @@ class AnimRender
   {
     var root = new Sprite();
     if (depth > 12) return root;
-    // Layers are listed top first (like the timeline), so draw them bottom first.
-    var i = sym.layers.length - 1;
-    while (i >= 0)
-    {
-      var layer = sym.layers[i];
-      var li = i;
-      i--;
-      if (!layer.visible) continue;
-      if (opts.forExport == true && layer.guide == true) continue;
-      if (layer.kind == 'camera' || layer.kind == 'audio') continue;
-      var key = AnimData.keyAt(layer, frame);
-      if (key == null) continue;
-      var layerSprite = new Sprite();
-      layerSprite.alpha = layer.alpha;
-      if (layer.blend != null) layerSprite.blendMode = blendOf(layer.blend);
-      var outline = (layer.outline == true || opts.allOutlines == true) && opts.forExport != true;
-
-      if (layer.kind == 'bitmap')
-      {
-        var bmp = doc.getBitmap(key.bitmap);
-        if (bmp != null)
-        {
-          var b = new Bitmap(bmp, PixelSnapping.NEVER, true);
-          b.x = key.bx ?? 0;
-          b.y = key.by ?? 0;
-          if (outline) b.alpha = 0.35;
-          layerSprite.addChild(b);
-        }
-      }
-      else
-      {
-        var elements = tweenedElements(layer, key, frame);
-        for (ei in 0...elements.length)
-        {
-          var el = elements[ei];
-          var obj = elementObject(el, frame - key.start, opts, depth, outline, layer.color);
-          if (obj == null) continue;
-          layerSprite.addChild(obj);
-          if (top && opts.collectHits == true) hits.push({obj: obj, layer: li, element: ei});
-        }
-      }
-      root.addChild(layerSprite);
-    }
+    renderLayers(sym, frame, opts, depth, top, 0, sym.layers.length, root);
     return root;
   }
 
   /**
-   * A keyframe's elements at a frame, with its classic tween applied.
+   * Draw layers `start`..`end` (one nesting level, with their folders' and masks' children) into `into`.
+   */
+  function renderLayers(sym:AnimSymbol, frame:Int, opts:AnimRenderOptions, depth:Int, top:Bool, start:Int, end:Int, into:Sprite):Void
+  {
+    // Each item is a layer and the layers nested under it.
+    var items:Array<{at:Int, end:Int}> = [];
+    var i = start;
+    while (i < end)
+    {
+      var level = sym.layers[i].depth ?? 0;
+      var j = i + 1;
+      while (j < end && (sym.layers[j].depth ?? 0) > level)
+        j++;
+      items.push({at: i, end: j});
+      i = j;
+    }
+    // Layers are listed top first (like the timeline), so draw them bottom first.
+    var k = items.length - 1;
+    while (k >= 0)
+    {
+      var item = items[k--];
+      var layer = sym.layers[item.at];
+      if (!layer.visible) continue;
+      if (opts.forExport == true && layer.guide == true) continue;
+      var hasChildren = item.end > item.at + 1;
+      if (layer.kind == 'folder')
+      {
+        if (hasChildren) renderLayers(sym, frame, opts, depth, top, item.at + 1, item.end, into);
+        continue;
+      }
+      var own = layerObject(sym, item.at, frame, opts, depth, top);
+      if (layer.mask == true && hasChildren)
+      {
+        var group = new Sprite();
+        renderLayers(sym, frame, opts, depth, top, item.at + 1, item.end, group);
+        // Like Animate, masks show while editing only when the mask layer is locked.
+        var masking = own != null && (opts.forExport == true || layer.locked) && layer.outline != true && opts.allOutlines != true;
+        into.addChild(group);
+        if (own != null)
+        {
+          into.addChild(own);
+          if (masking) group.mask = own;
+        }
+        continue;
+      }
+      if (hasChildren) renderLayers(sym, frame, opts, depth, top, item.at + 1, item.end, into);
+      if (own != null) into.addChild(own);
+    }
+  }
+
+  /**
+   * One layer's contents at a frame (null if it has nothing there).
+   */
+  function layerObject(sym:AnimSymbol, li:Int, frame:Int, opts:AnimRenderOptions, depth:Int, top:Bool):Null<Sprite>
+  {
+    var layer = sym.layers[li];
+    if (layer.kind == 'camera' || layer.kind == 'audio' || layer.kind == 'folder') return null;
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null) return null;
+    var layerSprite = new Sprite();
+    layerSprite.alpha = layer.alpha;
+    var blend = key.blend ?? layer.blend;
+    if (blend != null && blend != 'normal') layerSprite.blendMode = blendOf(blend);
+    if (key.filters != null && key.filters.length > 0) layerSprite.filters = filtersOf(key.filters);
+    if (top && depth == 0 && layer.fixed == true && fixedMatrix != null) layerSprite.transform.matrix = fixedMatrix.clone();
+    var outline = (layer.outline == true || opts.allOutlines == true) && opts.forExport != true;
+
+    if (layer.kind == 'bitmap')
+    {
+      var bmp = doc.getBitmap(key.bitmap);
+      if (bmp != null)
+      {
+        var b = new Bitmap(bmp, PixelSnapping.NEVER, true);
+        b.x = key.bx ?? 0;
+        b.y = key.by ?? 0;
+        if (outline) b.alpha = 0.35;
+        layerSprite.addChild(b);
+      }
+    }
+    else
+    {
+      var elements = tweenedElements(layer, key, frame);
+      for (ei in 0...elements.length)
+      {
+        var el = elements[ei];
+        var obj = elementObject(el, frame - key.start, opts, depth, outline, layer.color);
+        if (obj == null) continue;
+        layerSprite.addChild(obj);
+        if (top && opts.collectHits == true) hits.push({obj: obj, layer: li, element: ei});
+      }
+    }
+    return layerSprite;
+  }
+
+  /**
+   * A keyframe's elements at a frame, with its tween applied.
    */
   public function tweenedElements(layer:AnimLayer, key:AnimKeyframe, frame:Int):Array<AnimElement>
   {
@@ -196,8 +391,9 @@ class AnimRender
     var idx = layer.frames.indexOf(key);
     if (idx < 0 || idx + 1 >= layer.frames.length) return key.elements;
     var next = layer.frames[idx + 1];
-    var t = (frame - key.start) / key.duration;
-    t = QOLEase.get(key.tween.ease)(t);
+    if (next.start != key.start + key.duration) return key.elements;
+    var t = AnimEase.apply(key.tween, (frame - key.start) / key.duration);
+    if (key.tween.shape == true) return AnimMorph.elements(key, next, t);
     var out:Array<AnimElement> = [];
     for (i in 0...key.elements.length)
     {
@@ -225,20 +421,57 @@ class AnimRender
     while (dr < -180)
       dr += 360;
     dr += spins * 360;
+    var ds = db.skew - da.skew;
+    while (ds > 180)
+      ds -= 360;
+    while (ds < -180)
+      ds += 360;
     var m = AnimGeom.compose({
-      x: lerp(da.x, db.x, t),
-      y: lerp(da.y, db.y, t),
+      x: 0,
+      y: 0,
       scaleX: lerp(da.scaleX, db.scaleX, t),
       scaleY: lerp(da.scaleY, db.scaleY, t),
       rotation: da.rotation + dr * t,
-      skew: lerp(da.skew, db.skew, t)
+      skew: da.skew + ds * t
     });
+    // Like Animate, the transformation point moves in a straight line and everything turns and scales around it.
+    var pxA = a.px ?? 0, pyA = a.py ?? 0, pxB = b.px ?? pxA, pyB = b.py ?? pyA;
+    var px = lerp(pxA, pxB, t), py = lerp(pyA, pyB, t);
+    var ax = a.a * pxA + a.c * pyA + a.tx, ay = a.b * pxA + a.d * pyA + a.ty;
+    var bx = b.a * pxB + b.c * pyB + b.tx, by = b.b * pxB + b.d * pyB + b.ty;
+    var wx = lerp(ax, bx, t), wy = lerp(ay, by, t);
+    m.tx = wx - (m.a * px + m.c * py);
+    m.ty = wy - (m.b * px + m.d * py);
     var out:AnimElement = Reflect.copy(a);
     AnimGeom.setMatrix(out, m);
-    out.alpha = lerp(a.alpha ?? 1, b.alpha ?? 1, t);
-    out.brightness = lerp(a.brightness ?? 0, b.brightness ?? 0, t);
-    out.tintAmount = lerp(a.tintAmount ?? 0, b.tintAmount ?? 0, t);
-    if (b.tint != null && (b.tintAmount ?? 0) > 0) out.tint = a.tint == null ? b.tint : lerpColor(a.tint, b.tint, t);
+    if (a.px != null || b.px != null)
+    {
+      out.px = px;
+      out.py = py;
+    }
+    // Color effects blend as color transforms (so alpha can tween into a tint, like Animate).
+    var ca = colorArray(a), cb = colorArray(b);
+    if (ca != null || cb != null)
+    {
+      ca = ca ?? IDENTITY_CT;
+      cb = cb ?? IDENTITY_CT;
+      var simple = a.ct == null && b.ct == null && sameKind(a, b);
+      if (simple)
+      {
+        out.alpha = lerp(a.alpha ?? 1, b.alpha ?? 1, t);
+        out.brightness = lerp(a.brightness ?? 0, b.brightness ?? 0, t);
+        out.tintAmount = lerp(a.tintAmount ?? 0, b.tintAmount ?? 0, t);
+        if (b.tint != null && (b.tintAmount ?? 0) > 0) out.tint = a.tint == null ? b.tint : lerpColor(a.tint, b.tint, t);
+      }
+      else
+      {
+        out.ct = [for (i in 0...8) lerp(ca[i], cb[i], t)];
+        out.alpha = null;
+        out.tint = null;
+        out.tintAmount = null;
+        out.brightness = null;
+      }
+    }
     if (a.filters != null && b.filters != null && a.filters.length == b.filters.length)
     {
       out.filters = [];
@@ -264,6 +497,37 @@ class AnimRender
     return out;
   }
 
+  static final IDENTITY_CT:Array<Float> = [1, 1, 1, 1, 0, 0, 0, 0];
+
+  /**
+   * Both use only alpha, or only brightness, or only tint (then the simple values can tween directly).
+   */
+  static function sameKind(a:AnimElement, b:AnimElement):Bool
+  {
+    inline function kind(e:AnimElement):Int
+    {
+      var k = 0;
+      if ((e.alpha ?? 1) != 1) k |= 1;
+      if ((e.brightness ?? 0) != 0) k |= 2;
+      if (e.tint != null && (e.tintAmount ?? 0) != 0) k |= 4;
+      return k;
+    }
+    var ka = kind(a), kb = kind(b);
+    return ka == 0 || kb == 0 || ka == kb;
+  }
+
+  /**
+   * An element's color effect as multipliers and offsets (null if it has none).
+   */
+  public static function colorArray(el:AnimElement):Null<Array<Float>>
+  {
+    var ct = colorTransformOf(el);
+    if (ct == null) return null;
+    return [
+      ct.redMultiplier, ct.greenMultiplier, ct.blueMultiplier, ct.alphaMultiplier, ct.redOffset, ct.greenOffset, ct.blueOffset, ct.alphaOffset
+    ];
+  }
+
   static inline function lerp(a:Float, b:Float, t:Float):Float
     return a + (b - a) * t;
 
@@ -281,32 +545,24 @@ class AnimRender
    */
   public function elementObject(el:AnimElement, localFrame:Int, opts:AnimRenderOptions, depth:Int, outline:Bool, outlineColor:Int):Null<DisplayObject>
   {
+    if (el.hidden == true && opts.forExport == true) return null;
     var obj:Null<DisplayObject> = null;
     switch (el.type)
     {
       case 'shape':
-        var shape = new Shape();
-        if (el.paths != null) for (p in el.paths)
-          AnimGeom.drawPath(shape.graphics, p, outline, outlineColor);
-        obj = shape;
+        if (el.paths == null || el.paths.length == 0) return null;
+        obj = shapeFor(el.paths, outline, outlineColor);
       case 'bitmap':
         var bmp = doc.getBitmap(el.bitmap);
         if (bmp == null) return null;
-        var b = new Bitmap(bmp, PixelSnapping.NEVER, true);
+        var info = doc.bitmapInfo(el.bitmap);
+        var b = new Bitmap(bmp, PixelSnapping.NEVER, info == null || info.smooth != false);
         if (outline) b.alpha = 0.35;
         obj = b;
       case 'symbol':
         var sym = el.symbol == null ? null : doc.symbol(el.symbol);
         if (sym == null) return null;
-        var len = AnimData.symbolLength(sym);
-        var first = el.firstFrame ?? 0;
-        var f = switch (el.loop ?? 'loop')
-        {
-          case 'single': first;
-          case 'once': Std.int(Math.min(first + localFrame, len - 1));
-          default: (first + localFrame) % len;
-        };
-        var child = renderSymbol(sym, f, outline ? {forExport: opts.forExport, allOutlines: true} : opts, depth + 1, false);
+        var child = renderSymbol(sym, symbolFrame(el, sym, localFrame), outline ? {forExport: opts.forExport, allOutlines: true} : opts, depth + 1, false);
         obj = child;
       case 'text':
         var tf = new TextField();
@@ -323,7 +579,35 @@ class AnimRender
         return null;
     }
     applyLook(obj, el);
+    // Hidden instances stay faintly visible while editing so they can still be found.
+    if (el.hidden == true) obj.alpha *= 0.25;
     return obj;
+  }
+
+  /**
+   * Which frame of a symbol an instance shows, `localFrame` frames after its keyframe.
+   */
+  public static function symbolFrame(el:AnimElement, sym:AnimSymbol, localFrame:Int):Int
+  {
+    var len = AnimData.symbolLength(sym);
+    var first = Std.int(Math.max(0, Math.min(len - 1, el.firstFrame ?? 0)));
+    var last = el.lastFrame != null ? Std.int(Math.max(0, Math.min(len - 1, el.lastFrame))) : -1;
+    return switch (el.loop ?? 'loop')
+    {
+      case 'single': first;
+      case 'once':
+        Std.int(Math.min(first + localFrame, last >= first ? last : len - 1));
+      case 'loopReverse':
+        if (last >= 0 && last <= first) first - (localFrame % (first - last + 1));
+        else
+          ((first - localFrame) % len + len) % len;
+      case 'onceReverse':
+        Std.int(Math.max(first - localFrame, last >= 0 && last <= first ? last : 0));
+      default:
+        if (last > first) first + (localFrame % (last - first + 1));
+        else
+          (first + localFrame) % len;
+    };
   }
 
   /**
@@ -335,11 +619,36 @@ class AnimRender
     var ct = colorTransformOf(el);
     if (ct != null) obj.transform.colorTransform = ct;
     if (el.blend != null && el.blend != 'normal') obj.blendMode = blendOf(el.blend);
-    if (el.filters != null && el.filters.length > 0) obj.filters = [for (f in el.filters) filterOf(f)];
+    if (el.filters != null && el.filters.length > 0) obj.filters = filtersOf(el.filters);
+  }
+
+  public static function filtersOf(list:Array<AnimFilter>):Array<BitmapFilter>
+  {
+    var out:Array<BitmapFilter> = [];
+    for (f in list)
+    {
+      if (f.type == 'bevel')
+      {
+        // OpenFL has no bevel filter: a light inner shadow on one side and a dark one on the other look the same.
+        var q = f.quality ?? 2;
+        var hi = f.highlight ?? 0xFFFFFFFF, sh = f.shadowColor ?? 0xFF000000;
+        var dist = f.distance ?? 4, angle = f.angle ?? 45;
+        out.push(new DropShadowFilter(dist, angle + 180, hi & 0xFFFFFF, ((hi >>> 24) & 0xFF) / 255, f.blurX ?? 4, f.blurY ?? 4, f.strength ?? 1, q, true));
+        out.push(new DropShadowFilter(dist, angle, sh & 0xFFFFFF, ((sh >>> 24) & 0xFF) / 255, f.blurX ?? 4, f.blurY ?? 4, f.strength ?? 1, q, true));
+      }
+      else
+        out.push(filterOf(f));
+    }
+    return out;
   }
 
   public static function colorTransformOf(el:AnimElement):Null<ColorTransform>
   {
+    if (el.ct != null && el.ct.length >= 8)
+    {
+      var c = el.ct;
+      return new ColorTransform(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]);
+    }
     var alpha = el.alpha ?? 1;
     var tintAmt = el.tint != null ? (el.tintAmount ?? 0) : 0;
     var bright = el.brightness ?? 0;

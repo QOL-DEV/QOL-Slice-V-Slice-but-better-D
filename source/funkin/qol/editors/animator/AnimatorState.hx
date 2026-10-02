@@ -21,7 +21,9 @@ import haxe.ui.containers.menus.Menu;
 import haxe.ui.containers.Box;
 import haxe.ui.events.MouseEvent;
 import haxe.ui.data.ArrayDataSource;
+import openfl.display.Bitmap;
 import openfl.display.BitmapData;
+import openfl.display.PixelSnapping;
 import openfl.display.Shape;
 import openfl.display.Sprite;
 import openfl.geom.ColorTransform;
@@ -273,6 +275,7 @@ class AnimatorState extends QOLEditorState
     applySkin();
     timeline = new AnimTimelineView(this, camUI);
     add(timeline);
+    stopDropListen = funkin.qol.util.QOLFilePicker.listenForDrops(onFilesDropped);
 
     layoutReady = true;
     onLayoutChanged();
@@ -875,6 +878,7 @@ class AnimatorState extends QOLEditorState
 
   override function save():Bool
   {
+    commitPixels();
     var path = AnimIO.save(doc);
     QOLConfig.setPref('animator.last', AnimIO.fileId(doc.project.name));
     notifySaved(path);
@@ -883,6 +887,7 @@ class AnimatorState extends QOLEditorState
 
   function undo():Void
   {
+    dropPixels();
     if (doc.undo())
     {
       selection = [];
@@ -892,6 +897,7 @@ class AnimatorState extends QOLEditorState
 
   function redo():Void
   {
+    dropPixels();
     if (doc.redo())
     {
       selection = [];
@@ -1216,10 +1222,17 @@ class AnimatorState extends QOLEditorState
       if (!playing) canvasEmpty = !hasAnyContent();
       drawChecker();
       contentHolder.removeChildren();
-      var content = renderer.render(sym, frame, {collectHits: true});
+      var content = renderer.render(sym, frame, {collectHits: true, outerCamera: viewCamera()});
       content.x = symOffsetX();
       content.y = symOffsetY();
       contentHolder.addChild(content);
+      if (pixSel != null && pixSel.float != null)
+      {
+        var fb = new Bitmap(pixSel.float, PixelSnapping.NEVER, false);
+        fb.x = symOffsetX() + pixSel.fx;
+        fb.y = symOffsetY() + pixSel.fy;
+        contentHolder.addChild(fb);
+      }
       onionHolder.removeChildren();
       if (onion && !playing)
       {
@@ -1457,8 +1470,9 @@ class AnimatorState extends QOLEditorState
       }
       g.lineStyle();
     }
+    drawPixelSelection(g);
     // Marquee.
-    if (drag == 'marquee')
+    if (drag == 'marquee' || drag == 'pixmarquee')
     {
       g.lineStyle(1, 0xFFD84A, 1);
       g.beginFill(0xFFD84A, 0.08);
@@ -1616,6 +1630,11 @@ class AnimatorState extends QOLEditorState
       return;
     }
 
+    if (FlxG.mouse.justPressedRight && drag == '')
+    {
+      openCanvasMenu(mx, my);
+      return;
+    }
     if (FlxG.mouse.justPressed && drag == '') mouseDown(mx, my);
     else if (drag != '' && FlxG.mouse.pressed) mouseMove(mx, my);
     else if (drag != '' && !FlxG.mouse.pressed) mouseUp(mx, my);
@@ -1720,6 +1739,7 @@ class AnimatorState extends QOLEditorState
         {
           points = [{x: local.x, y: local.y, w: 1}];
           drag = tool == 'eraser' ? 'erase' : 'stroke';
+          lastErase = null;
           if (tool == 'eraser') eraseVectorAt(local);
         }
       case 'fill':
@@ -1757,6 +1777,8 @@ class AnimatorState extends QOLEditorState
         }
       case 'erase':
         eraseVectorAt(local);
+      case 'pixmove':
+        movePixels(local);
       case 'shape':
         drawLiveShape(toLocal(cDragX, cDragY), local);
       case 'campan' | 'camrotate':
@@ -1771,7 +1793,11 @@ class AnimatorState extends QOLEditorState
     switch (drag)
     {
       case 'marquee':
-        marqueeSelect(toLocal(cDragX, cDragY), local);
+        marqueeSelect(mx, my);
+      case 'pixmarquee':
+        selectPixels(mx, my);
+      case 'pixmove':
+        if (cDragMoved) doc.changed();
       case 'move' | 'scale' | 'rotate':
         if (cDragMoved) afterTimelineEdit();
       case 'paint':
@@ -1782,6 +1808,7 @@ class AnimatorState extends QOLEditorState
       case 'stroke':
         finishStroke();
       case 'erase':
+        lastErase = null;
         doc.changed();
       case 'shape':
         finishShape(toLocal(cDragX, cDragY), local);
@@ -2288,6 +2315,16 @@ class AnimatorState extends QOLEditorState
 
   function selectDown(mx:Float, my:Float, local:Point):Void
   {
+    // Selected pixels on a paint layer: drag them (Alt drags a copy).
+    if (pixSel != null && pixContains(local))
+    {
+      drag = 'pixmove';
+      pixGrab = local.clone();
+      pixGrabX = pixSel.float != null ? pixSel.fx : pixSel.x;
+      pixGrabY = pixSel.float != null ? pixSel.fy : pixSel.y;
+      return;
+    }
+    commitPixels();
     // Transform handles first.
     var b = selectionBounds();
     if (b != null)
@@ -2343,7 +2380,9 @@ class AnimatorState extends QOLEditorState
     }
     if (!FlxG.keys.pressed.SHIFT) selection = [];
     refreshProps();
-    drag = 'marquee';
+    // On a paint layer, the box selects pixels.
+    var layer = currentLayer();
+    drag = layer != null && layer.kind == 'bitmap' && !layer.locked && layer.visible ? 'pixmarquee' : 'marquee';
   }
 
   function hitTest():Null<AnimSel>
@@ -2509,19 +2548,473 @@ class AnimatorState extends QOLEditorState
     return nk;
   }
 
-  function marqueeSelect(a:Point, b:Point):Void
+  //
+  // Dropped files
+  //
+
+  var stopDropListen:Void->Void = () -> {};
+
+  function onFilesDropped(files:Array<funkin.qol.util.QOLFilePicker.QOLPickedFile>, wx:Float, wy:Float):Void
   {
-    var r = new Rectangle(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
-    if (r.width < 2 && r.height < 2) return;
-    for (h in renderer.hits)
+    // Window pixels -> the editor's view -> the timeline's coordinates.
+    var win = lime.app.Application.current.window;
+    var sx = wx * win.scale, sy = wy * win.scale;
+    var vx = (sx - FlxG.game.x) / FlxG.game.scaleX, vy = (sy - FlxG.game.y) / FlxG.game.scaleY;
+    var at = inWorkArea(vx, vy) ? toLocal(vx, vy) : null;
+    try
     {
-      var layer = sym.layers[h.layer];
-      if (layer == null || layer.locked || !layer.visible) continue;
-      var bb = h.obj.getBounds(contentHolder);
-      bb.x -= symOffsetX();
-      bb.y -= symOffsetY();
-      if (r.intersects(bb) && Lambda.find(selection, s -> s.layer == h.layer && s.element == h.element) == null)
-        selection.push({layer: h.layer, element: h.element});
+      AnimImport.importDropped(this, files, at);
+    }
+    catch (e)
+    {
+      alert('Could not import', Std.string(e));
+    }
+  }
+
+  /**
+   * Put an image on the stage at `at` (or the middle): floating pixels on a paint layer, otherwise a library image on
+   * a vector layer.
+   */
+  public function placeImage(bmp:BitmapData, name:String, at:Null<Point>):Void
+  {
+    var p = at ?? new Point(doc.project.width / 2 - symOffsetX(), doc.project.height / 2 - symOffsetY());
+    var layer = currentLayer();
+    if (layer != null && layer.kind == 'bitmap' && !layer.locked && layer.visible)
+    {
+      commitPixels();
+      doc.checkpoint();
+      var key = drawKey();
+      if (key == null)
+      {
+        doc.dropCheckpoint();
+        return;
+      }
+      doc.editableBitmap(key);
+      var x = Math.round(p.x - bmp.width / 2), y = Math.round(p.y - bmp.height / 2);
+      pixSel = {
+        layer: curLayer,
+        key: key,
+        x: Std.int(x),
+        y: Std.int(y),
+        w: bmp.width,
+        h: bmp.height,
+        float: bmp,
+        fx: x,
+        fy: y
+      };
+      setTool('select', true);
+      renderDirty = true;
+      doc.changed();
+      setStatus('Image added to the paint layer: drag it into place, then click outside it to drop it in.');
+      return;
+    }
+    if (layer == null || layer.kind != 'vector' || layer.locked || !layer.visible) addLayer('vector');
+    doc.checkpoint();
+    var key = drawKey();
+    if (key == null)
+    {
+      doc.dropCheckpoint();
+      return;
+    }
+    var id = doc.addBitmap(bmp, name, true);
+    var el = AnimData.identity('bitmap');
+    el.bitmap = id;
+    el.tx = Math.round(p.x - bmp.width / 2);
+    el.ty = Math.round(p.y - bmp.height / 2);
+    key.elements.push(el);
+    setTool('select', true);
+    selection = [{layer: curLayer, element: key.elements.length - 1}];
+    doc.changed();
+    setStatus('Image placed (it\'s in the Library too).');
+  }
+
+  //
+  // Pixel selection (paint layers)
+  //
+
+  /**
+   * Selected pixels on a paint layer: a box (in the timeline's coordinates). Once moved or pasted, the pixels are lifted
+   * off the canvas and float at fx, fy until they're dropped back in.
+   */
+  var pixSel:Null<{layer:Int, key:AnimKeyframe, x:Int, y:Int, w:Int, h:Int, float:Null<BitmapData>, fx:Float, fy:Float}> = null;
+
+  var pixClipboard:Null<BitmapData> = null;
+  var pixGrab:Null<Point> = null;
+  var pixGrabX:Float = 0;
+  var pixGrabY:Float = 0;
+
+  function pixContains(p:Point):Bool
+  {
+    if (pixSel == null) return false;
+    var x = pixSel.float != null ? pixSel.fx : pixSel.x;
+    var y = pixSel.float != null ? pixSel.fy : pixSel.y;
+    return p.x >= x && p.y >= y && p.x < x + pixSel.w && p.y < y + pixSel.h;
+  }
+
+  function selectPixels(mx:Float, my:Float):Void
+  {
+    if (Math.abs(mx - cDragX) < 2 && Math.abs(my - cDragY) < 2) return;
+    var layer = currentLayer();
+    if (layer == null || layer.kind != 'bitmap') return;
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null || doc.getBitmap(key.bitmap) == null) return;
+    var r = AnimCut.polyBounds([for (c in [toLocal(cDragX, cDragY), toLocal(mx, cDragY), toLocal(mx, my), toLocal(cDragX, my)]) for (v in [c.x, c.y]) v]);
+    // Only the canvas has pixels.
+    var bmp = doc.getBitmap(key.bitmap);
+    var cx = key.bx ?? 0, cy = key.by ?? 0;
+    var x0 = Math.max(Math.floor(r.x), cx), y0 = Math.max(Math.floor(r.y), cy);
+    var x1 = Math.min(Math.ceil(r.right), cx + bmp.width), y1 = Math.min(Math.ceil(r.bottom), cy + bmp.height);
+    if (x1 - x0 < 1 || y1 - y0 < 1) return;
+    pixSel = {
+      layer: curLayer,
+      key: key,
+      x: Std.int(x0),
+      y: Std.int(y0),
+      w: Std.int(x1 - x0),
+      h: Std.int(y1 - y0),
+      float: null,
+      fx: x0,
+      fy: y0
+    };
+    setStatus('Pixels selected: drag to move them (Alt drags a copy), Delete clears them, Ctrl+C copies, F8 makes a symbol.');
+  }
+
+  /**
+   * Lift the selected pixels off the canvas (a copy when `keep`).
+   */
+  function liftPixels(keep:Bool):Bool
+  {
+    if (pixSel == null) return false;
+    if (pixSel.float != null) return true;
+    var key = pixSel.key;
+    if (doc.getBitmap(key.bitmap) == null) return false;
+    doc.checkpoint();
+    var bmp = doc.editableBitmap(key);
+    var rect = new Rectangle(pixSel.x - (key.bx ?? 0), pixSel.y - (key.by ?? 0), pixSel.w, pixSel.h);
+    var float = new BitmapData(pixSel.w, pixSel.h, true, 0);
+    float.copyPixels(bmp, rect, new Point(0, 0));
+    if (!keep) bmp.fillRect(rect, 0);
+    pixSel.float = float;
+    pixSel.fx = pixSel.x;
+    pixSel.fy = pixSel.y;
+    renderDirty = true;
+    return true;
+  }
+
+  function movePixels(local:Point):Void
+  {
+    if (pixSel == null || pixGrab == null || !cDragMoved) return;
+    if (pixSel.float == null && !liftPixels(FlxG.keys.pressed.ALT)) return;
+    var dx = local.x - pixGrab.x, dy = local.y - pixGrab.y;
+    if (FlxG.keys.pressed.SHIFT)
+    {
+      if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+      else
+        dx = 0;
+    }
+    pixSel.fx = Math.round(pixGrabX + dx);
+    pixSel.fy = Math.round(pixGrabY + dy);
+    renderDirty = true;
+    dirty = true;
+  }
+
+  function nudgePixels(dx:Int, dy:Int):Bool
+  {
+    if (pixSel == null) return false;
+    if (pixSel.float == null && !liftPixels(false)) return true;
+    pixSel.fx += dx;
+    pixSel.fy += dy;
+    renderDirty = true;
+    dirty = true;
+    return true;
+  }
+
+  /**
+   * Drop floating pixels back into the canvas (growing it if they moved past its edge) and clear the selection.
+   */
+  function commitPixels():Void
+  {
+    if (pixSel == null) return;
+    var sel = pixSel;
+    pixSel = null;
+    if (sel.float == null) return;
+    var key = sel.key;
+    var bmp = doc.getBitmap(key.bitmap);
+    if (bmp != null)
+    {
+      var bx = key.bx ?? 0, by = key.by ?? 0;
+      var minX = Math.min(bx, sel.fx), minY = Math.min(by, sel.fy);
+      var maxX = Math.max(bx + bmp.width, sel.fx + sel.w), maxY = Math.max(by + bmp.height, sel.fy + sel.h);
+      if (minX < bx || minY < by || maxX > bx + bmp.width || maxY > by + bmp.height)
+      {
+        var nw = Std.int(Math.min(MAX_CANVAS, Math.ceil(maxX - minX))), nh = Std.int(Math.min(MAX_CANVAS, Math.ceil(maxY - minY)));
+        var grown = new BitmapData(nw, nh, true, 0);
+        grown.copyPixels(bmp, bmp.rect, new Point(bx - minX, by - minY));
+        doc.replaceBitmap(key.bitmap, grown);
+        bmp.dispose();
+        bmp = grown;
+        key.bx = minX;
+        key.by = minY;
+        bx = minX;
+        by = minY;
+      }
+      bmp.copyPixels(sel.float, sel.float.rect, new Point(sel.fx - bx, sel.fy - by), null, null, true);
+    }
+    sel.float.dispose();
+    renderDirty = true;
+    doc.changed();
+  }
+
+  /**
+   * Forget the selection without dropping floating pixels (undo puts the canvas back anyway).
+   */
+  function dropPixels():Void
+  {
+    if (pixSel != null && pixSel.float != null) pixSel.float.dispose();
+    pixSel = null;
+  }
+
+  function deletePixels():Void
+  {
+    if (pixSel == null) return;
+    if (pixSel.float != null)
+    {
+      // Lifted pixels were already cut out of the canvas.
+      pixSel.float.dispose();
+      pixSel = null;
+      renderDirty = true;
+      doc.changed();
+      return;
+    }
+    var key = pixSel.key;
+    if (doc.getBitmap(key.bitmap) != null)
+    {
+      doc.checkpoint();
+      var bmp = doc.editableBitmap(key);
+      bmp.fillRect(new Rectangle(pixSel.x - (key.bx ?? 0), pixSel.y - (key.by ?? 0), pixSel.w, pixSel.h), 0);
+    }
+    pixSel = null;
+    doc.changed();
+  }
+
+  function selectedPixels():Null<BitmapData>
+  {
+    if (pixSel == null) return null;
+    if (pixSel.float != null) return pixSel.float.clone();
+    var key = pixSel.key;
+    var bmp = doc.getBitmap(key.bitmap);
+    if (bmp == null) return null;
+    var out = new BitmapData(pixSel.w, pixSel.h, true, 0);
+    out.copyPixels(bmp, new Rectangle(pixSel.x - (key.bx ?? 0), pixSel.y - (key.by ?? 0), pixSel.w, pixSel.h), new Point(0, 0));
+    return out;
+  }
+
+  function copyPixels():Void
+  {
+    var px = selectedPixels();
+    if (px == null) return;
+    lastPixPaste = new Point(pixSel.float != null ? pixSel.fx : pixSel.x, pixSel.float != null ? pixSel.fy : pixSel.y);
+    pixClipboard?.dispose();
+    pixClipboard = px;
+    setStatus('Copied ${px.width}x${px.height} pixels.');
+  }
+
+  /**
+   * Paste copied pixels as a floating selection on the current paint layer (where they were copied from).
+   */
+  function pastePixels():Bool
+  {
+    var layer = currentLayer();
+    if (pixClipboard == null || layer == null || layer.kind != 'bitmap') return false;
+    commitPixels();
+    doc.checkpoint();
+    var key = drawKey();
+    if (key == null)
+    {
+      doc.dropCheckpoint();
+      return true;
+    }
+    doc.editableBitmap(key);
+    var px = lastPixPaste ?? new Point(Math.round(doc.project.width / 2 - pixClipboard.width / 2 - symOffsetX()), Math.round(doc.project.height / 2 - pixClipboard.height / 2 - symOffsetY()));
+    pixSel = {
+      layer: curLayer,
+      key: key,
+      x: Std.int(px.x),
+      y: Std.int(px.y),
+      w: pixClipboard.width,
+      h: pixClipboard.height,
+      float: pixClipboard.clone(),
+      fx: px.x,
+      fy: px.y
+    };
+    setTool('select', true);
+    renderDirty = true;
+    doc.changed();
+    return true;
+  }
+
+  var lastPixPaste:Null<Point> = null;
+
+  /**
+   * F8 on selected pixels: they become an image in the library, inside a new symbol placed on a new layer above.
+   */
+  function pixelsToSymbol():Void
+  {
+    if (pixSel == null) return;
+    var px = selectedPixels();
+    if (px == null) return;
+    var sel = pixSel;
+    prompt('Convert to Symbol', 'Symbol name', 'Symbol ${doc.project.symbols.length}', name -> {
+      if (name == null || name == '') return;
+      // Cut the pixels out of the canvas (or drop the floating ones).
+      if (sel.float != null)
+      {
+        sel.float.dispose();
+        pixSel = null;
+      }
+      else
+      {
+        doc.checkpoint();
+        var bmp = doc.editableBitmap(sel.key);
+        bmp.fillRect(new Rectangle(sel.x - (sel.key.bx ?? 0), sel.y - (sel.key.by ?? 0), sel.w, sel.h), 0);
+        pixSel = null;
+      }
+      var x = sel.float != null ? sel.fx : sel.x;
+      var y = sel.float != null ? sel.fy : sel.y;
+      var bmpId = doc.addBitmap(px, name, true);
+      var symbol = AnimData.newSymbol(AnimData.makeId('sym'), name);
+      var img = AnimData.identity('bitmap');
+      img.bitmap = bmpId;
+      img.tx = -px.width / 2;
+      img.ty = -px.height / 2;
+      symbol.layers[0].frames[0].elements.push(img);
+      doc.project.symbols.push(symbol);
+      var layerIdx = curLayer;
+      var layer = AnimData.newLayer(name, 'vector', sym.layers.length);
+      layer.depth = sym.layers[layerIdx].depth;
+      layer.frames = [{start: frame, duration: 1, elements: []}];
+      if (frame > 0) layer.frames.unshift({start: 0, duration: frame, elements: []});
+      var inst = AnimData.identity('symbol');
+      inst.symbol = symbol.id;
+      inst.tx = x + px.width / 2;
+      inst.ty = y + px.height / 2;
+      layer.frames[layer.frames.length - 1].elements.push(inst);
+      sym.layers.insert(layerIdx, layer);
+      curLayer = layerIdx;
+      selection = [{layer: layerIdx, element: 0}];
+      setTool('select', true);
+      doc.changed();
+    });
+  }
+
+  /**
+   * Marching ants around selected pixels.
+   */
+  function drawPixelSelection(g:openfl.display.Graphics):Void
+  {
+    if (pixSel == null) return;
+    var x = pixSel.float != null ? pixSel.fx : pixSel.x;
+    var y = pixSel.float != null ? pixSel.fy : pixSel.y;
+    var pts = [toScreen(x, y), toScreen(x + pixSel.w, y), toScreen(x + pixSel.w, y + pixSel.h), toScreen(x, y + pixSel.h)];
+    var phase = (haxe.Timer.stamp() * 16) % 8;
+    for (i in 0...4)
+    {
+      var a = pts[i], b = pts[(i + 1) % 4];
+      var len = Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+      if (len < 1) continue;
+      g.lineStyle(1, 0x000000, 0.8);
+      g.moveTo(a.x, a.y);
+      g.lineTo(b.x, b.y);
+      g.lineStyle(1, 0xFFFFFF, 1);
+      var t = -phase;
+      while (t < len)
+      {
+        var t0 = Math.max(0, t), t1 = Math.min(len, t + 4);
+        if (t1 > t0)
+        {
+          g.moveTo(a.x + (b.x - a.x) * t0 / len, a.y + (b.y - a.y) * t0 / len);
+          g.lineTo(a.x + (b.x - a.x) * t1 / len, a.y + (b.y - a.y) * t1 / len);
+        }
+        t += 8;
+      }
+    }
+    g.lineStyle();
+  }
+
+  /**
+   * Select with a box: whole items it touches, and just the part of a shape that's inside it (like Animate, the shape
+   * is cut in two so that part can be moved on its own).
+   */
+  function marqueeSelect(mx:Float, my:Float):Void
+  {
+    if (Math.abs(mx - cDragX) < 2 && Math.abs(my - cDragY) < 2) return;
+    var corners = [toLocal(cDragX, cDragY), toLocal(mx, cDragY), toLocal(mx, my), toLocal(cDragX, my)];
+    var region:Array<Float> = [];
+    for (c in corners)
+    {
+      region.push(c.x);
+      region.push(c.y);
+    }
+    var r = AnimCut.polyBounds(region);
+    var checkpointed = false;
+    for (li in 0...sym.layers.length)
+    {
+      var layer = sym.layers[li];
+      if (layer.locked || !layer.visible || layer.kind != 'vector') continue;
+      var key = AnimData.keyAt(layer, frame);
+      if (key == null) continue;
+      var i = key.elements.length - 1;
+      while (i >= 0)
+      {
+        var el = key.elements[i];
+        var already = Lambda.find(selection, s -> s.layer == li && s.element == i) != null;
+        if (already)
+        {
+          i--;
+          continue;
+        }
+        if (el.type == 'shape' && el.paths != null && (key.tween == null || frame == key.start))
+        {
+          var parts = AnimCut.split(el, region);
+          if (parts.inside.length > 0)
+          {
+            if (parts.outside.length == 0) selection.push({layer: li, element: i});
+            else
+            {
+              if (!checkpointed)
+              {
+                doc.checkpoint();
+                checkpointed = true;
+              }
+              // The part outside stays; the part inside becomes its own shape right above it.
+              el.paths = parts.outside;
+              var piece:AnimElement = Reflect.copy(el);
+              piece.paths = parts.inside;
+              key.elements.insert(i + 1, piece);
+              for (s in selection)
+                if (s.layer == li && s.element > i) s.element++;
+              selection.push({layer: li, element: i + 1});
+            }
+          }
+        }
+        else
+        {
+          var h = Lambda.find(renderer.hits, h -> h.layer == li && h.element == i);
+          if (h != null)
+          {
+            var bb = h.obj.getBounds(contentHolder);
+            bb.x -= symOffsetX();
+            bb.y -= symOffsetY();
+            if (r.intersects(bb)) selection.push({layer: li, element: i});
+          }
+        }
+        i--;
+      }
+    }
+    if (checkpointed)
+    {
+      renderDirty = true;
+      doc.changed();
     }
     if (selection.length > 0) curLayer = selection[0].layer;
     refreshProps();
@@ -2696,11 +3189,19 @@ class AnimatorState extends QOLEditorState
     doc.changed();
   }
 
+  var lastErase:Null<Point> = null;
+
+  /**
+   * The vector eraser rubs out just the parts of shapes and lines it passes over (like Animate's eraser).
+   */
   function eraseVectorAt(local:Point):Void
   {
     var key = AnimData.keyAt(currentLayer(), frame);
     if (key == null) return;
+    var from = lastErase ?? local;
+    lastErase = local.clone();
     var r = eraserSize / 2;
+    var region = AnimCut.capsule(from.x, from.y, local.x, local.y, r);
     var changed = false;
     var i = key.elements.length - 1;
     while (i >= 0)
@@ -2708,23 +3209,14 @@ class AnimatorState extends QOLEditorState
       var el = key.elements[i];
       if (el.type == 'shape' && el.paths != null)
       {
-        var inv = AnimGeom.matrixOf(el);
-        inv.invert();
-        var p = inv.transformPoint(local);
-        var j = el.paths.length - 1;
-        while (j >= 0)
+        var kept = AnimCut.cutPaths(el, region, false);
+        if (kept != null)
         {
-          var path = el.paths[j];
-          var hit = AnimGeom.distanceToPath(path, p.x, p.y) <= r + (path.width ?? 0) / 2;
-          if (!hit && path.fill != null) hit = AnimGeom.pathContains(path, p.x, p.y);
-          if (hit)
-          {
-            el.paths.splice(j, 1);
-            changed = true;
-          }
-          j--;
+          if (kept.length == 0) key.elements.splice(i, 1);
+          else
+            el.paths = kept;
+          changed = true;
         }
-        if (el.paths.length == 0) key.elements.splice(i, 1);
       }
       i--;
     }
@@ -2993,6 +3485,11 @@ class AnimatorState extends QOLEditorState
 
   function copySelection():Void
   {
+    if (pixSel != null)
+    {
+      copyPixels();
+      return;
+    }
     var els = [for (s in selection) elementOf(s)].filter(e -> e != null);
     if (els.length == 0) return;
     clipboard = haxe.Json.stringify(els);
@@ -3001,6 +3498,7 @@ class AnimatorState extends QOLEditorState
 
   function pasteSelection():Void
   {
+    if (pastePixels()) return;
     if (clipboard == null) return;
     var layer = currentLayer();
     if (layer == null || layer.kind == 'bitmap') return;
@@ -3027,6 +3525,11 @@ class AnimatorState extends QOLEditorState
 
   function deleteSelection():Void
   {
+    if (pixSel != null)
+    {
+      deletePixels();
+      return;
+    }
     if (selection.length == 0) return;
     doc.checkpoint();
     // Remove from the end so indexes stay valid.
@@ -3062,6 +3565,11 @@ class AnimatorState extends QOLEditorState
    */
   function convertToSymbol():Void
   {
+    if (pixSel != null)
+    {
+      pixelsToSymbol();
+      return;
+    }
     if (selection.length == 0)
     {
       notify('Nothing selected', 'Select some shapes or objects first (Select tool, V).');
@@ -3149,6 +3657,7 @@ class AnimatorState extends QOLEditorState
   public function enterSymbol(id:String):Void
   {
     if (doc.symbol(id) == null) return;
+    commitPixels();
     editPath.push(id);
     frame = 0;
     curLayer = 0;
@@ -3163,6 +3672,7 @@ class AnimatorState extends QOLEditorState
   function exitSymbol(all:Bool):Void
   {
     if (editPath.length == 0) return;
+    commitPixels();
     if (all) editPath = [];
     else
       editPath.pop();
@@ -3339,6 +3849,7 @@ class AnimatorState extends QOLEditorState
   public function selectLayer(i:Int):Void
   {
     if (i == curLayer) return;
+    commitPixels();
     curLayer = i;
     selection = [for (s in selection) if (s.layer == i) s];
     refreshProps();
@@ -3435,6 +3946,7 @@ class AnimatorState extends QOLEditorState
     if (f < 0) f = 0;
     if (resetSel) selStart = selEnd = f;
     if (f == frame) return;
+    commitPixels();
     frame = f;
     clampState();
     renderDirty = true;
@@ -3705,11 +4217,153 @@ class AnimatorState extends QOLEditorState
   }
 
   /**
+   * Right-click menu on the stage (whatever's under the mouse gets selected first, like Animate).
+   */
+  function openCanvasMenu(mx:Float, my:Float):Void
+  {
+    var local = toLocal(mx, my);
+    if (pixSel != null && !pixContains(local)) commitPixels();
+    if (pixSel == null)
+    {
+      var hit = hitTest();
+      if (hit != null && Lambda.find(selection, s -> s.layer == hit.layer && s.element == hit.element) == null)
+      {
+        if (tool != 'select') setTool('select', true);
+        selection = [hit];
+        curLayer = hit.layer;
+        refreshProps();
+      }
+    }
+    var menu = themePopup(new Menu());
+    var el = selection.length == 1 ? elementOf(selection[0]) : null;
+    if (pixSel != null)
+    {
+      addMenuItem(menu, 'Cut', 'Ctrl+X', () -> {
+        copyPixels();
+        deletePixels();
+      });
+      addMenuItem(menu, 'Copy', 'Ctrl+C', copyPixels);
+      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
+      addMenuItem(menu, 'Delete', 'Delete', deletePixels);
+      addMenuSeparator(menu);
+      addMenuItem(menu, 'Convert to Symbol...', 'F8', pixelsToSymbol);
+      addMenuItem(menu, 'Deselect', 'Esc', commitPixels);
+    }
+    else if (selection.length > 0)
+    {
+      addMenuItem(menu, 'Cut', 'Ctrl+X', () -> {
+        copySelection();
+        deleteSelection();
+      });
+      addMenuItem(menu, 'Copy', 'Ctrl+C', copySelection);
+      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
+      addMenuItem(menu, 'Duplicate', null, () -> {
+        copySelection();
+        pasteSelection();
+      });
+      addMenuItem(menu, 'Delete', 'Delete', deleteSelection);
+      addMenuSeparator(menu);
+      addMenuItem(menu, 'Convert to Symbol...', 'F8', convertToSymbol);
+      if (el != null && el.type == 'symbol' && el.symbol != null)
+      {
+        var id = el.symbol;
+        addMenuItem(menu, 'Edit Symbol', 'Double-click', () -> enterSymbol(id));
+        addMenuItem(menu, 'Break Apart', 'Ctrl+B', breakApart);
+      }
+      addMenuSeparator(menu);
+      var arr = addSubMenu(menu, 'Arrange');
+      addMenuItem(arr, 'Bring to Front', 'Ctrl+Shift+Up', () -> arrange(99999));
+      addMenuItem(arr, 'Bring Forward', 'Ctrl+Up', () -> arrange(1));
+      addMenuItem(arr, 'Send Backward', 'Ctrl+Down', () -> arrange(-1));
+      addMenuItem(arr, 'Send to Back', 'Ctrl+Shift+Down', () -> arrange(-99999));
+      var tr = addSubMenu(menu, 'Transform');
+      addMenuItem(tr, 'Flip Horizontal', null, () -> transformSelection(m -> m.scale(-1, 1)));
+      addMenuItem(tr, 'Flip Vertical', null, () -> transformSelection(m -> m.scale(1, -1)));
+      addMenuItem(tr, 'Rotate 90 Clockwise', null, () -> transformSelection(m -> m.rotate(Math.PI / 2)));
+      addMenuItem(tr, 'Rotate 90 Counter-Clockwise', null, () -> transformSelection(m -> m.rotate(-Math.PI / 2)));
+      addMenuSeparator(menu);
+      addMenuItem(menu, 'Create Classic Tween', null, () -> setTween(true));
+      addMenuItem(menu, 'Select All', 'Ctrl+A', selectAll);
+    }
+    else
+    {
+      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
+      addMenuItem(menu, 'Select All', 'Ctrl+A', selectAll);
+      addMenuSeparator(menu);
+      addMenuItem(menu, 'Insert Keyframe', 'F6', () -> insertKeyframe(false));
+      addMenuItem(menu, 'Insert Blank Keyframe', 'F7', () -> insertKeyframe(true));
+      addMenuItem(menu, 'New Layer', null, () -> addLayer('vector'));
+      addMenuItem(menu, 'New Paint Layer', null, () -> addLayer('bitmap'));
+      addMenuSeparator(menu);
+      addMenuItem(menu, 'Fit Stage', 'Ctrl+0', fitView);
+      addMenuItem(menu, 'Canvas Color...', null, () -> openCanvasColorDialog());
+    }
+    var pos = FlxG.mouse.getViewPosition(camUI);
+    menu.left = Math.min(pos.x, FlxG.width - 230);
+    menu.top = Math.min(pos.y, FlxG.height - 360);
+    pos.put();
+    menu.show();
+  }
+
+  /**
+   * Right-click menu on a layer's name.
+   */
+  public function openLayerMenu(row:Int):Void
+  {
+    var layer = sym.layers[row];
+    if (layer == null) return;
+    var menu = themePopup(new Menu());
+    addMenuItem(menu, 'Rename...', 'Double-click', () -> renameLayer(row));
+    addMenuItem(menu, 'Duplicate Layer', null, duplicateLayer);
+    addMenuItem(menu, 'Delete Layer', null, deleteLayer);
+    addMenuSeparator(menu);
+    addMenuItem(menu, 'New Layer', null, () -> addLayer('vector'));
+    addMenuItem(menu, 'New Paint Layer', null, () -> addLayer('bitmap'));
+    addMenuItem(menu, 'Add Sound...', null, () -> AnimImport.importAudio(this));
+    addMenuSeparator(menu);
+    addMenuCheck(menu, 'Visible', layer.visible, _ -> toggleLayer(row, 'visible'));
+    addMenuCheck(menu, 'Locked', layer.locked, _ -> toggleLayer(row, 'locked'));
+    addMenuCheck(menu, 'Outline', layer.outline == true, _ -> toggleLayer(row, 'outline'));
+    addMenuCheck(menu, 'Guide (not exported)', layer.guide == true, v -> {
+      doc.checkpoint();
+      layer.guide = v ? true : null;
+      doc.changed();
+    });
+    addMenuSeparator(menu);
+    addMenuItem(menu, 'Hide Others', null, () -> {
+      doc.checkpoint();
+      for (i in 0...sym.layers.length)
+        sym.layers[i].visible = i == row;
+      doc.changed();
+    });
+    addMenuItem(menu, 'Lock Others', null, () -> {
+      doc.checkpoint();
+      for (i in 0...sym.layers.length)
+        sym.layers[i].locked = i != row;
+      doc.changed();
+    });
+    addMenuItem(menu, 'Show All', null, () -> {
+      doc.checkpoint();
+      for (l in sym.layers)
+      {
+        l.visible = true;
+        l.locked = false;
+      }
+      doc.changed();
+    });
+    var pos = FlxG.mouse.getViewPosition(camUI);
+    menu.left = Math.min(pos.x, FlxG.width - 230);
+    menu.top = Math.min(pos.y, FlxG.height - 400);
+    pos.put();
+    menu.show();
+  }
+
+  /**
    * Right-click menu on the timeline.
    */
   public function openFrameMenu():Void
   {
-    var menu = new Menu();
+    var menu = themePopup(new Menu());
     addMenuItem(menu, 'Insert Frame', 'F5', () -> insertFrames(1));
     addMenuItem(menu, 'Remove Frames', 'Shift+F5', removeFrames);
     addMenuItem(menu, 'Insert Keyframe', 'F6', () -> insertKeyframe(false));
@@ -3759,7 +4413,11 @@ class AnimatorState extends QOLEditorState
         b.removeClass(cls);
       b.icon = on ? AnimatorSkin.icon(tid, 22, 0xFFFFFFFF) : AnimatorSkin.icon(tid, 22, AnimatorSkin.TOOL_COLORS.get(tid));
     }
-    if (id != 'select') selection = [];
+    if (id != 'select')
+    {
+      selection = [];
+      commitPixels();
+    }
     if (changed && !quiet && decor != null)
     {
       var t = Lambda.find(TOOLS, t -> t.id == id);
@@ -4139,10 +4797,20 @@ class AnimatorState extends QOLEditorState
     if (k.justPressed.LBRACKET) adjustSize(-1);
     if (k.justPressed.RBRACKET) adjustSize(1);
     var step = k.pressed.SHIFT ? 10 : 1;
-    if (k.justPressed.LEFT) nudge(-step, 0);
-    if (k.justPressed.RIGHT) nudge(step, 0);
-    if (k.justPressed.UP) nudge(0, -step);
-    if (k.justPressed.DOWN) nudge(0, step);
+    if (pixSel != null)
+    {
+      if (k.justPressed.LEFT) nudgePixels(-step, 0);
+      if (k.justPressed.RIGHT) nudgePixels(step, 0);
+      if (k.justPressed.UP) nudgePixels(0, -step);
+      if (k.justPressed.DOWN) nudgePixels(0, step);
+    }
+    else
+    {
+      if (k.justPressed.LEFT) nudge(-step, 0);
+      if (k.justPressed.RIGHT) nudge(step, 0);
+      if (k.justPressed.UP) nudge(0, -step);
+      if (k.justPressed.DOWN) nudge(0, step);
+    }
     if (!k.pressed.SPACE)
     {
       for (t in TOOLS)
@@ -4152,6 +4820,12 @@ class AnimatorState extends QOLEditorState
 
   override public function exitEditor():Void
   {
+    // Escape drops selected pixels first.
+    if (pixSel != null)
+    {
+      commitPixels();
+      return;
+    }
     // Escape leaves symbol editing first.
     if (editPath.length > 0)
     {
@@ -4182,6 +4856,7 @@ class AnimatorState extends QOLEditorState
 
   override public function destroy():Void
   {
+    stopDropListen();
     QOLSlice.editorOwnsFunctionKeys = false;
     audio?.stopAll();
     if (canvasRoot != null && canvasRoot.parent != null) canvasRoot.parent.removeChild(canvasRoot);
