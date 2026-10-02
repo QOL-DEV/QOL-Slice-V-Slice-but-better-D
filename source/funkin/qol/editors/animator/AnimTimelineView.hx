@@ -6,6 +6,7 @@ import flixel.FlxSprite;
 import flixel.graphics.FlxGraphic;
 import flixel.group.FlxGroup;
 import flixel.text.FlxText;
+import flixel.text.FlxText.FlxTextAlign;
 import flixel.util.FlxColor;
 import funkin.qol.editors.animator.AnimData;
 import funkin.qol.ui.QOLTheme;
@@ -19,8 +20,8 @@ import openfl.display.Shape;
 class AnimTimelineView extends FlxGroup
 {
   public static final LABEL_W:Int = 236;
-  public static final RULER_H:Int = 22;
-  public static final ROW_H:Int = 22;
+  public static final RULER_H:Int = 24;
+  public static final ROW_H:Int = 24;
 
   public var x:Float = 0;
   public var y:Float = 0;
@@ -65,6 +66,13 @@ class AnimTimelineView extends FlxGroup
   var gLockOff:FlxGraphic;
   var gOutline:FlxGraphic;
   var gSquare:FlxGraphic;
+  var gPen:FlxGraphic;
+  var gPixels:FlxGraphic;
+  var gGuide:FlxGraphic;
+  var gTag:FlxGraphic;
+  var gArrow:FlxGraphic;
+  var playheadGlow:FlxSprite;
+  var subtitle:FlxText;
 
   // Input.
   var drag:String = '';
@@ -81,25 +89,46 @@ class AnimTimelineView extends FlxGroup
     super();
     this.ed = ed;
     this.cam = cam;
-    gKeyFull = QOLTheme.cached('anim-key-full', () -> circleBitmap(9, 0xFF101014, 0xFFE8E0FF, true));
-    gKeyEmpty = QOLTheme.cached('anim-key-empty', () -> circleBitmap(9, 0xFFE8E0FF, 0xFF101014, false));
-    gEyeOn = QOLTheme.cached('anim-eye-on', () -> circleBitmap(10, 0xFFE8E0FF, 0xFFE8E0FF, true));
-    gEyeOff = QOLTheme.cached('anim-eye-off', () -> circleBitmap(10, 0xFF5A5470, 0xFF5A5470, false));
-    gLockOn = QOLTheme.cached('anim-lock-on', () -> squareBitmap(10, 0xFFFF9F43, true));
-    gLockOff = QOLTheme.cached('anim-lock-off', () -> squareBitmap(10, 0xFF5A5470, false));
-    gOutline = QOLTheme.cached('anim-outline', () -> squareBitmap(10, 0xFFFFFFFF, false));
-    gSquare = QOLTheme.cached('anim-square', () -> squareBitmap(10, 0xFFFFFFFF, true));
+    gKeyFull = QOLTheme.cached('anim-key-full2', () -> circleBitmap(11, 0xFF1A1030, 0xFFFFFFFF, true));
+    gKeyEmpty = QOLTheme.cached('anim-key-empty2', () -> circleBitmap(11, 0xFFFFFFFF, 0xFFFFFFFF, false));
+    gEyeOn = AnimatorSkin.iconGraphic('eye', 14, 0xFFEDE6FF, false);
+    gEyeOff = AnimatorSkin.iconGraphic('eye-off', 14, 0xFF5E5488, false);
+    gLockOn = AnimatorSkin.iconGraphic('lock', 14, 0xFFFFA43D, false);
+    gLockOff = AnimatorSkin.iconGraphic('unlock', 14, 0xFF5E5488, false);
+    gOutline = AnimatorSkin.iconGraphic('outline', 14, 0xFFFFFFFF, false);
+    gSquare = AnimatorSkin.iconGraphic('solid', 14, 0xFFFFFFFF, false);
+    gPen = AnimatorSkin.iconGraphic('pen', 14, 0xFFFFFFFF, false);
+    gPixels = AnimatorSkin.iconGraphic('pixels', 14, 0xFFFFFFFF, false);
+    gGuide = AnimatorSkin.iconGraphic('guide', 14, 0xFFFFFFFF, false);
+    gArrow = QOLTheme.cached('anim-tween-arrow', () -> {
+      var sh = new Shape();
+      sh.graphics.beginFill(0xFFFFFF, 1);
+      sh.graphics.moveTo(0, 0);
+      sh.graphics.lineTo(8, 5);
+      sh.graphics.lineTo(0, 10);
+      sh.graphics.lineTo(0, 0);
+      sh.graphics.endFill();
+      var b = new BitmapData(9, 11, true, 0);
+      b.draw(sh, null, null, null, null, true);
+      return b;
+    });
+    gTag = QOLTheme.cached('anim-playhead-tag', () -> QOLTheme.drawRound(34, RULER_H - 4, 0xFFFF5C9D, 8, 0xFFFFB3D1, 1.5));
 
-    bg = rect(0xFF17181D);
-    labelBg = rect(0xFF202229);
-    rulerBg = rect(0xFF26283A);
-    divider = rect(0xFF3A3F4F);
-    playhead = rect(0xFFFF3355);
-    playheadTag = rect(0xFFFF3355);
-    playheadText = QOLTheme.text(0, 0, 40, '', 10, QOLTheme.FONT_MONO, FlxColor.WHITE);
+    bg = rect(0xFF140F26);
+    labelBg = rect(0xFF1B1533);
+    rulerBg = rect(0xFF221A40);
+    divider = rect(0xFF3D3366);
+    playheadGlow = rect(0xFFFF5C9D);
+    playhead = rect(0xFFFF5C9D);
+    playheadTag = prep(new FlxSprite().loadGraphic(gTag));
+    playheadText = QOLTheme.text(0, 0, 34, '', 11, QOLTheme.FONT_TITLE, FlxColor.WHITE);
+    playheadText.alignment = CENTER;
     prep(playheadText);
-    title = QOLTheme.text(0, 0, LABEL_W - 16, 'TIMELINE', 12, QOLTheme.FONT_TITLE, QOLTheme.ACCENT_PINK);
+    title = QOLTheme.text(0, 0, LABEL_W - 16, 'TIMELINE', 13, QOLTheme.FONT_TITLE, QOLTheme.ACCENT_PINK);
     prep(title);
+    subtitle = QOLTheme.text(0, 0, LABEL_W - 16, '', 10, QOLTheme.FONT_BODY, 0xFF8C80BF);
+    subtitle.alignment = RIGHT;
+    prep(subtitle);
     add(bg);
     add(labelBg);
     add(rulerBg);
@@ -109,7 +138,9 @@ class AnimTimelineView extends FlxGroup
     add(layerKeys);
     add(layerText);
     add(title);
+    add(subtitle);
     add(divider);
+    add(playheadGlow);
     add(playhead);
     add(playheadTag);
     add(playheadText);
@@ -230,7 +261,7 @@ class AnimTimelineView extends FlxGroup
     return s;
   }
 
-  function txt(x:Float, y:Float, w:Float, s:String, size:Int, color:FlxColor, ?mono:Bool = false):FlxText
+  function txt(x:Float, y:Float, w:Float, s:String, size:Int, color:FlxColor, ?mono:Bool = false, ?center:Bool = false):FlxText
   {
     var t = pooled(texts, nText++, layerText, () -> QOLTheme.text(0, 0, 10, '', 11, QOLTheme.FONT_BODY, FlxColor.WHITE));
     if (t.size != size) t.size = size;
@@ -239,6 +270,8 @@ class AnimTimelineView extends FlxGroup
     if (t.font != font) t.font = font;
     if (t.text != s) t.text = s;
     t.color = color;
+    var align:FlxTextAlign = center ? CENTER : LEFT;
+    if (t.alignment != align) t.alignment = align;
     t.setPosition(x, y);
     return t;
   }
@@ -261,6 +294,9 @@ class AnimTimelineView extends FlxGroup
     return s;
   }
 
+  static inline function mix(a:Int, b:Int, t:Float):FlxColor
+    return AnimRender.lerpColor(a | 0xFF000000, b | 0xFF000000, t);
+
   public function redraw():Void
   {
     nSpan = nKey = nText = nIcon = nGrid = nRow = 0;
@@ -269,13 +305,32 @@ class AnimTimelineView extends FlxGroup
     place(labelBg, x, y, LABEL_W, height);
     place(rulerBg, gridX, y, width - LABEL_W, RULER_H);
     place(divider, gridX - 1, y, 1, height);
-    title.setPosition(x + 8, y + 3);
+    title.setPosition(x + 10, y + 4);
+    var layerCount = sym.layers.length;
+    var sub = '$layerCount layer${layerCount == 1 ? '' : 's'} \u00B7 ${AnimData.symbolLength(sym)}f';
+    if (subtitle.text != sub) subtitle.text = sub;
+    subtitle.setPosition(x + 8, y + 6);
+    subtitle.fieldWidth = LABEL_W - 18;
 
     var frames = visibleFrames;
     var rows = visibleRows;
     var bottom = y + height;
+    var mp = FlxG.mouse.getViewPosition(cam);
+    var mx = mp.x, my = mp.y;
+    mp.put();
+    var hoverFrame = contains(mx, my) && mx >= gridX && drag == '' ? frameAt(mx) : -1;
+    var hoverRow = hoverFrame >= 0 ? rowAt(my) : -1;
 
-    // Ruler numbers & frame grid.
+    // Every fifth frame gets a lighter column, like Flash.
+    for (i in 0...frames + 1)
+    {
+      var f = scrollFrame + i;
+      var fx = frameX(f);
+      if (fx > x + width) break;
+      if ((f + 1) % 5 == 0) span(fx, y + RULER_H, Math.min(cellW, x + width - fx), height - RULER_H, 0xFFFFFFFF, 0.035);
+    }
+
+    // Ruler numbers & ticks.
     for (i in 0...frames + 1)
     {
       var f = scrollFrame + i;
@@ -283,15 +338,9 @@ class AnimTimelineView extends FlxGroup
       if (fx > x + width) break;
       var major = (f + 1) % 5 == 0 || f == 0;
       var line = pooled(gridLines, nGrid++, layerGrid, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
-      place(line, fx, y + (major ? RULER_H - 8 : RULER_H - 4), 1, (major ? 8 : 4));
-      line.color = 0xFF5A5470;
-      if (major)
-      {
-        var gl = pooled(gridLines, nGrid++, layerGrid, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
-        place(gl, fx + cellW, y + RULER_H, 1, height - RULER_H);
-        gl.color = 0xFF262833;
-        if ((f + 1) % 5 == 0 || f == 0) txt(fx + 1, y + 3, 40, '${f + 1}', 10, 0xFF9A93B8, true);
-      }
+      place(line, fx + cellW / 2, y + (major ? RULER_H - 7 : RULER_H - 4), 1, (major ? 7 : 4));
+      line.color = major ? 0xFF8C80BF : 0xFF4A3F78;
+      if (major && f != ed.frame) txt(fx + cellW / 2 - 15, y + 5, 30, '${f + 1}', 10, 0xFFA99CD6, true, true);
     }
 
     // Layers.
@@ -304,76 +353,101 @@ class AnimTimelineView extends FlxGroup
       var ry = rowY(li);
       if (ry + ROW_H > bottom + 1) break;
       var selected = li == ed.curLayer;
+      var baseBg:Int = r % 2 == 0 ? 0xFF181230 : 0xFF1C1636;
+      var rowColor:Int = selected ? mix(baseBg, layer.color, 0.22) : baseBg;
       var rowBg = pooled(rowBgs, nRow++, layerRows, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
       place(rowBg, x, ry, width, ROW_H - 1);
-      rowBg.color = selected ? 0xFF2F3B58 : (r % 2 == 0 ? 0xFF1B1D24 : 0xFF1E2028);
+      rowBg.color = rowColor;
 
       // Label column.
-      span(x + 4, ry + 4, 4, ROW_H - 9, layer.color);
-      var kindTag = layer.kind == 'bitmap' ? '[B] ' : '';
-      var guideTag = layer.guide == true ? '(guide) ' : '';
-      txt(x + 14, ry + 4, LABEL_W - 80, kindTag + guideTag + layer.name, 12, selected ? FlxColor.WHITE : 0xFFC9C2E6);
-      icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 56, ry + 6);
-      icon(layer.locked ? gLockOn : gLockOff, x + LABEL_W - 38, ry + 6);
-      icon(layer.outline == true ? gOutline : gSquare, x + LABEL_W - 20, ry + 6, layer.color);
+      span(x + 4, ry + 3, 4, ROW_H - 7, layer.color);
+      if (selected) span(x + 8, ry + 3, 2, ROW_H - 7, layer.color, 0.35);
+      icon(layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen), x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
+      txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? 0xFFC9C2E6 : 0xFF6E6497));
+      icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 60, ry + 5);
+      icon(layer.locked ? gLockOn : gLockOff, x + LABEL_W - 41, ry + 5);
+      icon(layer.outline == true ? gOutline : gSquare, x + LABEL_W - 22, ry + 5, layer.color);
 
       // Frame selection.
       if (selected && ed.selEnd >= ed.selStart)
       {
         var sx = Math.max(gridX, frameX(ed.selStart));
         var ex = frameX(ed.selEnd + 1);
-        if (ex > sx) span(sx, ry, ex - sx, ROW_H - 1, 0xFF3D6BFF, 0.35);
+        if (ex > sx) span(sx, ry, ex - sx, ROW_H - 1, 0xFF5CE1FF, 0.22);
       }
 
-      // Keyframes.
+      // Keyframe spans and dots.
       for (k in layer.frames)
       {
         var kx = frameX(k.start);
         var kw = k.duration * cellW;
         if (kx > x + width || kx + kw < gridX) continue;
         var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null);
-        var color:FlxColor = k.tween != null ? 0xFF5B4B9A : (has ? 0xFF3A3F4F : 0xFF26282F);
+        var color:FlxColor = k.tween != null ? mix(rowColor, 0xFF9B6BFF, 0.55) : (has ? mix(rowColor, layer.color, 0.32) : mix(rowColor, 0xFF3D3366, 0.5));
         var sx = Math.max(gridX, kx + 1);
         var ex = Math.min(x + width, kx + kw);
-        if (ex > sx) span(sx, ry + 2, ex - sx - 1, ROW_H - 5, color);
+        if (ex > sx) span(sx, ry + 3, ex - sx - 1, ROW_H - 7, color);
         if (k.tween != null && kw > cellW * 2)
         {
-          // Tween arrow line.
+          // Tween arrow.
           var lx = Math.max(gridX, kx + cellW);
-          var lw = Math.min(x + width, kx + kw - cellW / 2) - lx;
-          if (lw > 0) span(lx, ry + ROW_H / 2 - 1, lw, 1, 0xFFE8E0FF);
+          var lw = Math.min(x + width, kx + kw - cellW * 0.7) - lx;
+          if (lw > 0) span(lx, ry + ROW_H / 2 - 1, lw, 2, 0xFFEDE6FF, 0.85);
+          var hx = kx + kw - cellW * 0.7;
+          if (hx > gridX && hx < x + width) icon(gArrow, hx - 4, ry + ROW_H / 2 - 5.5, 0xFFEDE6FF);
         }
         if (kx >= gridX - 1)
         {
           var key = pooled(keys, nKey++, layerKeys, () -> new FlxSprite());
           var g = has ? gKeyFull : gKeyEmpty;
           if (key.graphic != g) key.loadGraphic(g);
-          key.setPosition(kx + (cellW - 9) / 2, ry + (ROW_H - 9) / 2 - 1);
-          key.color = FlxColor.WHITE;
+          key.setPosition(kx + (cellW - 11) / 2, ry + (ROW_H - 11) / 2 - 1);
+          key.color = has ? mix(layer.color, 0xFFFFFFFF, 0.35) : mix(layer.color, 0xFFFFFFFF, 0.5);
         }
-        // End of span.
+        // End of a span.
         if (k.duration > 1)
         {
           var endX = frameX(k.start + k.duration - 1);
-          if (endX >= gridX && endX < x + width) span(endX + cellW / 2 - 3, ry + ROW_H - 9, 6, 5, 0xFF8A86A8);
+          if (endX >= gridX && endX < x + width) span(endX + cellW / 2 - 3, ry + ROW_H - 10, 6, 5, mix(layer.color, 0xFFFFFFFF, 0.4), 0.8);
         }
-        if (k.label != null && k.label != '' && kx >= gridX) txt(kx + 10, ry + 3, Math.max(20, kw - 10), k.label, 10, 0xFFFF8FB8);
+        if (k.label != null && k.label != '' && kx >= gridX) txt(kx + 12, ry + 4, Math.max(20, kw - 12), k.label, 10, 0xFFFFD84A);
       }
+
+      // Hover cell.
+      if (hoverRow == li && hoverFrame >= 0) span(frameX(hoverFrame), ry, cellW, ROW_H - 1, 0xFFFFFFFF, 0.08);
+    }
+
+    // "+ New layer" row and tips in the empty space below the layers.
+    var nextRow = sym.layers.length;
+    var ny = rowY(nextRow);
+    if (nextRow >= scrollRow && ny + ROW_H <= bottom)
+    {
+      var hoverNew = contains(mx, my) && mx < gridX && rowAt(my) == nextRow && drag == '';
+      if (hoverNew) span(x, ny, LABEL_W, ROW_H - 1, 0xFFFF5C9D, 0.18);
+      txt(x + 14, ny + 4, LABEL_W - 20, '+  New layer', 12, hoverNew ? 0xFFFFFFFF : 0xFFFF8FC0);
+      if (ny + ROW_H * 2.5 <= bottom)
+        txt(gridX + 12, bottom - 22, width - LABEL_W - 24,
+          'Drag keyframes to move them  \u00B7  Right-click frames for more  \u00B7  Double-click a layer to rename it  \u00B7  Ctrl + wheel zooms the timeline', 10,
+          0xFF5E5488);
     }
 
     // Symbol end.
     var endX = frameX(lengthAll);
-    if (endX >= gridX && endX <= x + width) span(endX, y + RULER_H, 1, height - RULER_H, 0xFF7CE38B, 0.6);
+    if (endX >= gridX && endX <= x + width) span(endX, y + RULER_H, 2, height - RULER_H, 0xFF6BE38E, 0.5);
 
     // Playhead.
     var px = frameX(ed.frame);
-    playhead.visible = playheadTag.visible = playheadText.visible = px >= gridX - 1 && px <= x + width;
-    if (playhead.visible)
+    var show = px >= gridX - 1 && px <= x + width;
+    playhead.visible = playheadGlow.visible = playheadTag.visible = playheadText.visible = show;
+    if (show)
     {
-      place(playhead, px + cellW / 2, y + RULER_H, 1, height - RULER_H);
-      place(playheadTag, px, y + 1, Math.max(cellW, 24), RULER_H - 3);
+      var cx = px + cellW / 2;
+      place(playheadGlow, cx - 3, y + RULER_H - 2, 6, height - RULER_H + 2);
+      playheadGlow.alpha = ed.playing ? 0.3 + Math.sin(haxe.Timer.stamp() * 8) * 0.12 : 0.22;
+      place(playhead, cx - 1, y + RULER_H - 2, 2, height - RULER_H + 2);
+      playheadTag.setPosition(Math.round(cx - 17), y + 2);
       playheadText.text = '${ed.frame + 1}';
-      playheadText.setPosition(px + 2, y + 4);
+      playheadText.setPosition(Math.round(cx - 17), y + 4);
     }
 
     hide(rowBgs, nRow);
@@ -459,6 +533,11 @@ class AnimTimelineView extends FlxGroup
     {
       drag = 'scrub';
       ed.setFrame(Std.int(Math.max(0, frameAt(mx))));
+      return true;
+    }
+    if (row == sym.layers.length && mx < gridX && FlxG.mouse.justPressed)
+    {
+      ed.addLayer('vector');
       return true;
     }
     if (row < 0 || row >= sym.layers.length)

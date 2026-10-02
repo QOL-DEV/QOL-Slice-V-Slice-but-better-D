@@ -16,6 +16,8 @@ import haxe.ui.containers.ListView;
 import haxe.ui.containers.TabView;
 import haxe.ui.containers.VBox;
 import haxe.ui.containers.menus.Menu;
+import haxe.ui.containers.Box;
+import haxe.ui.events.MouseEvent;
 import haxe.ui.data.ArrayDataSource;
 import openfl.display.BitmapData;
 import openfl.display.Shape;
@@ -59,7 +61,7 @@ class AnimatorState extends QOLEditorState
     {id: 'zoom', name: 'Zoom', key: 'Z'},
   ];
 
-  static inline final CONTROLS_H:Int = 30;
+  static inline final CONTROLS_H:Int = 36;
 
   public var doc:AnimDoc;
   public var renderer:AnimRender;
@@ -152,11 +154,19 @@ class AnimatorState extends QOLEditorState
   var frameLabel:Label;
   var pathLabel:Label;
   var backButton:Button;
+  var loopButton:Button;
+  var onionButton:Button;
+  var badge:Label;
+  var decor:AnimCanvasDecor;
+  var stageDecor:Shape;
+  var playIconShown:Null<Bool> = null;
 
   public function new(?animId:String)
   {
     super();
     editorName = 'Animator';
+    AnimatorSkin.loadCss();
+    popupClasses = ['anim-ui', 'anim-popup'];
     bottomAreaHeight = 230;
     bottomAreaResizable = true;
     bottomAreaMin = 110;
@@ -175,7 +185,9 @@ class AnimatorState extends QOLEditorState
   override function buildEditor():Void
   {
     QOLSlice.editorOwnsFunctionKeys = true;
-    camWorld.bgColor = 0xFF2A2B31;
+    AnimatorSkin.loadCss();
+    root.addClass('anim-ui');
+    camWorld.bgColor = AnimatorSkin.BG_BOTTOM;
     gridBG.visible = false;
 
     camCanvas = new FlxCamera();
@@ -186,6 +198,8 @@ class AnimatorState extends QOLEditorState
 
     canvasRoot = new Sprite();
     attachCanvas();
+    stageDecor = new Shape();
+    canvasRoot.addChild(stageDecor);
     stageHolder = new Sprite();
     canvasRoot.addChild(stageHolder);
     checker = new Shape();
@@ -206,18 +220,41 @@ class AnimatorState extends QOLEditorState
     doc.onChange = onDocChanged;
     renderer = new AnimRender(doc);
 
+    decor = new AnimCanvasDecor(camWorld, camUI);
+    add(decor);
+
     buildMenus();
     buildToolsPanel();
     buildInspector();
     buildControls();
+    applySkin();
     timeline = new AnimTimelineView(this, camUI);
     add(timeline);
 
     layoutReady = true;
     onLayoutChanged();
     fitView();
-    setTool('brush');
+    setTool('brush', true);
     refreshAll();
+  }
+
+  /**
+   * The Animator's own look: colored panel headers, a themed status bar and the "QOL ANIMATOR" badge.
+   */
+  function applySkin():Void
+  {
+    toolsPanel.setSkin('#1E1838', '#3D3366', 'background: #FF5C9D #FF8A4C horizontal;', '#FFFFFF');
+    inspector.setSkin('#1E1838', '#3D3366', 'background: #8F5CFF #4C8DFF horizontal;', '#FFFFFF');
+    statusBar.styleString = 'background: #261C4A #1A1434 vertical; border-top: 1px solid #3D3366; padding-left: 8px; padding-right: 8px; padding-top: 4px;';
+    statusLabel.styleString = 'color: #DCD3FF;';
+    statusRight.styleString = 'text-align: right; color: #FF8FC0;';
+    badge = new Label();
+    badge.text = 'QOL ANIMATOR';
+    badge.width = 128;
+    badge.styleString = 'background: #FF5C9D #9B6BFF horizontal; border: 1px solid #FFB3D1; border-radius: 11px; padding-top: 4px; padding-bottom: 4px; '
+      + 'color: #FFFFFF; font-bold: true; font-size: 12px; text-align: center;';
+    badge.tooltip = 'The QOL Slice Animator. Press F1 for the guide.';
+    root.addComponent(badge);
   }
 
   var layoutReady:Bool = false;
@@ -226,10 +263,16 @@ class AnimatorState extends QOLEditorState
   {
     if (!layoutReady) return;
     // The bar spans the whole bottom area (buttons outside a container's width can't be clicked).
-    ctrlBar.left = 8;
-    ctrlBar.top = workBottom + 2;
-    ctrlBar.width = FlxG.width - 16;
-    timeline.setBounds(0, workBottom + CONTROLS_H + 2, FlxG.width, FlxG.height - (workBottom + CONTROLS_H + 2) - QOLEditorState.STATUSBAR_HEIGHT);
+    ctrlBar.left = 0;
+    ctrlBar.top = workBottom;
+    ctrlBar.width = FlxG.width;
+    ctrlBar.height = CONTROLS_H;
+    if (badge != null)
+    {
+      badge.left = FlxG.width - 128 - 8;
+      badge.top = 5;
+    }
+    timeline.setBounds(0, workBottom + CONTROLS_H, FlxG.width, FlxG.height - (workBottom + CONTROLS_H) - QOLEditorState.STATUSBAR_HEIGHT);
   }
 
   function buildMenus():Void
@@ -332,35 +375,89 @@ class AnimatorState extends QOLEditorState
 
   function buildToolsPanel():Void
   {
-    toolsPanel = addDockPanel('tools', 'Tools', 136, 'left');
+    toolsPanel = addDockPanel('tools', 'Tools', 150, 'left');
     var box = new VBox();
-    box.width = 108;
-    box.styleString = 'spacing: 3px;';
-    for (t in TOOLS)
+    box.styleString = 'spacing: 4px;';
+    var row:Null<HBox> = null;
+    for (i in 0...TOOLS.length)
     {
+      var t = TOOLS[i];
+      if (i % 3 == 0)
+      {
+        row = new HBox();
+        row.styleString = 'spacing: 4px;';
+        box.addComponent(row);
+      }
       var b = new Button();
-      b.text = '${t.name}  (${t.key})';
-      b.width = 108;
-      b.toggle = true;
+      b.width = 38;
+      b.height = 36;
+      b.addClass('anim-tool');
+      b.icon = AnimatorSkin.icon(t.id, 22, AnimatorSkin.TOOL_COLORS.get(t.id));
+      b.tooltip = '${t.name}  (${t.key})';
       var id = t.id;
       b.onClick = _ -> setTool(id);
       toolButtons.set(t.id, b);
-      box.addComponent(b);
+      row.addComponent(b);
     }
     toolsPanel.content.addComponent(box);
 
-    colorForm = new QOLForm(44, 60);
+    colorForm = new QOLForm(44, 72);
     colorForm.section('Colors');
     colorForm.colorField('Stroke', () -> strokeColor | 0xFF000000, v -> strokeColor = (strokeColor & 0xFF000000) | (v & 0xFFFFFF));
     colorForm.colorField('Fill', () -> fillColor | 0xFF000000, v -> fillColor = (fillColor & 0xFF000000) | (v & 0xFFFFFF));
-    colorForm.button('Swap', () -> {
-      var t = strokeColor;
-      strokeColor = fillColor;
-      fillColor = t;
-      colorForm.refresh();
-    });
-    colorForm.note('Brush & bucket use Fill; pencil, lines and outlines use Stroke.');
+    var swap = new Button();
+    swap.text = 'Swap';
+    swap.icon = AnimatorSkin.icon('swap', 14, 0xFFFFFFFF, false);
+    swap.width = 122;
+    swap.tooltip = 'Swap the stroke and fill colors (X)';
+    swap.onClick = _ -> swapColors();
+    colorForm.addComponent(swap);
     toolsPanel.content.addComponent(colorForm);
+
+    // Quick palette: click = fill, right-click = stroke.
+    var paletteBox = new VBox();
+    paletteBox.styleString = 'spacing: 4px;';
+    var prow:Null<HBox> = null;
+    for (i in 0...AnimatorSkin.PALETTE.length)
+    {
+      var p = AnimatorSkin.PALETTE[i];
+      if (i % 4 == 0)
+      {
+        prow = new HBox();
+        prow.styleString = 'spacing: 4px;';
+        paletteBox.addComponent(prow);
+      }
+      var sw = new Box();
+      sw.width = 26;
+      sw.height = 22;
+      sw.addClass('anim-swatch');
+      sw.styleString = 'background-color: #${StringTools.hex(p.color & 0xFFFFFF, 6)};';
+      sw.tooltip = '${p.name}\nClick: fill  \u00B7  Right-click: stroke';
+      var color = p.color;
+      sw.onClick = _ -> {
+        fillColor = (fillColor & 0xFF000000) | (color & 0xFFFFFF);
+        colorForm.refresh();
+      };
+      sw.registerEvent(MouseEvent.RIGHT_CLICK, _ -> {
+        strokeColor = (strokeColor & 0xFF000000) | (color & 0xFFFFFF);
+        colorForm.refresh();
+      });
+      prow.addComponent(sw);
+    }
+    toolsPanel.content.addComponent(paletteBox);
+    var tip = new Label();
+    tip.text = 'Brush & bucket use Fill; pencil, lines and outlines use Stroke.';
+    tip.width = 122;
+    tip.addClass('anim-note');
+    toolsPanel.content.addComponent(tip);
+  }
+
+  function swapColors():Void
+  {
+    var t = strokeColor;
+    strokeColor = fillColor;
+    fillColor = t;
+    colorForm.refresh();
   }
 
   function buildInspector():Void
@@ -439,35 +536,93 @@ class AnimatorState extends QOLEditorState
   function buildControls():Void
   {
     ctrlBar = new HBox();
-    ctrlBar.styleString = 'spacing: 4px;';
+    ctrlBar.styleString = 'spacing: 4px; background: #2A1F52 #201842 vertical; border-top: 1px solid #3D3366; border-bottom: 1px solid #3D3366; '
+      + 'padding-left: 8px; padding-right: 8px; padding-top: 4px;';
     root.addComponent(ctrlBar);
     pathLabel = new Label();
-    pathLabel.styleString = 'color: #FF8FB8; font-bold: true; padding-top: 5px;';
+    pathLabel.styleString = 'color: #FF8FC0; font-bold: true; padding-top: 6px; padding-right: 4px;';
     ctrlBar.addComponent(pathLabel);
-    backButton = smallButton('Back to Scene', 'Stop editing this symbol (Esc)', () -> exitSymbol(true));
+    backButton = iconButton('back', 'Scene', 'Stop editing this symbol (Esc)', () -> exitSymbol(true));
     ctrlBar.addComponent(backButton);
-    ctrlBar.addComponent(smallButton('|<', 'First frame (Home)', () -> setFrame(0)));
-    ctrlBar.addComponent(smallButton('<', 'Previous frame (,)', () -> setFrame(Std.int(Math.max(0, frame - 1)))));
-    playButton = smallButton('Play', 'Play / stop (Enter)', togglePlay);
-    playButton.width = 56;
+    ctrlBar.addComponent(gap(6));
+    ctrlBar.addComponent(iconButton('first', null, 'First frame (Home)', () -> setFrame(0)));
+    ctrlBar.addComponent(iconButton('prev', null, 'Previous frame (,)', () -> setFrame(Std.int(Math.max(0, frame - 1)))));
+    playButton = iconButton('play', null, 'Play / stop (Enter)', togglePlay, 18);
+    playButton.width = 46;
+    playButton.addClass('anim-play');
     ctrlBar.addComponent(playButton);
-    ctrlBar.addComponent(smallButton('>', 'Next frame (.)', () -> setFrame(frame + 1)));
-    frameLabel = new Label();
-    frameLabel.width = 150;
-    frameLabel.styleString = 'color: #9FE8FF; padding-top: 5px;';
-    ctrlBar.addComponent(frameLabel);
-    ctrlBar.addComponent(smallButton('+ Layer', 'New vector layer', () -> addLayer('vector')));
-    ctrlBar.addComponent(smallButton('+ Bitmap', 'New bitmap (paint) layer', () -> addLayer('bitmap')));
-    ctrlBar.addComponent(smallButton('Delete Layer', 'Delete the selected layer', deleteLayer));
-    ctrlBar.addComponent(smallButton('Frame', 'Insert frame (F5)', () -> insertFrames(1)));
-    ctrlBar.addComponent(smallButton('Keyframe', 'Insert keyframe (F6)', () -> insertKeyframe(false)));
-    ctrlBar.addComponent(smallButton('Blank', 'Insert blank keyframe (F7)', () -> insertKeyframe(true)));
-    ctrlBar.addComponent(smallButton('Tween', 'Classic tween from this keyframe to the next', () -> setTween(true)));
-    ctrlBar.addComponent(smallButton('Onion', 'Onion skin', () -> {
+    ctrlBar.addComponent(iconButton('next', null, 'Next frame (.)', () -> setFrame(frame + 1)));
+    ctrlBar.addComponent(iconButton('last', null, 'Last frame (End)', () -> setFrame(AnimData.symbolLength(sym) - 1)));
+    loopButton = iconButton('loop', null, 'Loop playback', () -> {
+      loopPlayback = !loopPlayback;
+      updateToggles();
+    });
+    ctrlBar.addComponent(loopButton);
+    onionButton = iconButton('onion', null, 'Onion skin: see the frames around this one', () -> {
       onion = !onion;
       renderDirty = true;
       docForm.refresh();
-    }));
+      updateToggles();
+    });
+    ctrlBar.addComponent(onionButton);
+    frameLabel = new Label();
+    frameLabel.width = 150;
+    frameLabel.styleString = 'background-color: #15112A; border: 1px solid #3D3366; border-radius: 12px; color: #9FE8FF; padding-top: 5px; '
+      + 'padding-bottom: 5px; text-align: center; font-bold: true;';
+    ctrlBar.addComponent(frameLabel);
+    ctrlBar.addComponent(gap(10));
+    ctrlBar.addComponent(colored(iconButton('layer', 'Layer', 'New vector layer', () -> addLayer('vector'), 16, AnimatorSkin.CYAN), 'cyan'));
+    ctrlBar.addComponent(colored(iconButton('bitmap', 'Paint Layer', 'New bitmap layer, for painting pixels', () -> addLayer('bitmap'), 16, AnimatorSkin.GREEN), 'green'));
+    ctrlBar.addComponent(colored(iconButton('trash', null, 'Delete the selected layer', deleteLayer, 16, 0xFFFF6B6B), 'red'));
+    ctrlBar.addComponent(gap(10));
+    ctrlBar.addComponent(colored(iconButton('frame', 'Frame', 'Insert frame (F5)', () -> insertFrames(1), 16, 0xFFEDE6FF), 'purple'));
+    ctrlBar.addComponent(colored(iconButton('keyframe', 'Keyframe', 'Insert keyframe (F6)', () -> insertKeyframe(false), 16, AnimatorSkin.YELLOW), 'yellow'));
+    ctrlBar.addComponent(colored(iconButton('blank', 'Blank', 'Insert blank keyframe (F7)', () -> insertKeyframe(true), 16, AnimatorSkin.YELLOW), 'yellow'));
+    ctrlBar.addComponent(colored(iconButton('tween', 'Tween', 'Classic tween from this keyframe to the next', () -> setTween(true), 16, AnimatorSkin.PURPLE), 'purple'));
+    updateToggles();
+  }
+
+  function iconButton(iconName:String, text:Null<String>, tip:String, cb:Void->Void, size:Int = 16, color:Int = 0xFFFFFFFF):Button
+  {
+    var b = new Button();
+    if (text != null) b.text = text;
+    b.icon = AnimatorSkin.icon(iconName, size, color, true);
+    b.tooltip = tip;
+    b.height = 26;
+    if (text == null) b.width = 32;
+    b.addClass('anim-icon-button');
+    b.onClick = _ -> cb();
+    return b;
+  }
+
+  static function colored(b:Button, name:String):Button
+  {
+    b.addClass('anim-btn-$name');
+    return b;
+  }
+
+  static function gap(w:Int):Box
+  {
+    var g = new Box();
+    g.width = w;
+    g.height = 4;
+    return g;
+  }
+
+  function updateToggles():Void
+  {
+    if (loopButton != null)
+    {
+      if (loopPlayback) loopButton.addClass('anim-on');
+      else
+        loopButton.removeClass('anim-on');
+    }
+    if (onionButton != null)
+    {
+      if (onion) onionButton.addClass('anim-on');
+      else
+        onionButton.removeClass('anim-on');
+    }
   }
 
   function smallButton(text:String, tip:String, cb:Void->Void):Button
@@ -717,19 +872,25 @@ class AnimatorState extends QOLEditorState
     renderCanvas();
     timeline.redraw();
     updateLabels();
+    updateDecor();
   }
 
   function updateLabels():Void
   {
     var len = AnimData.symbolLength(sym);
     var t = frame / doc.project.fps;
-    var text = 'Frame ${frame + 1} / $len   ${Std.string(Math.round(t * 100) / 100)}s';
+    var text = '${frame + 1} / $len  \u00B7  ${Std.string(Math.round(t * 100) / 100)}s';
     if (frameLabel.text != text) frameLabel.text = text;
     var path = editPath.length == 0 ? 'Scene' : 'Scene > ' + [for (id in editPath) doc.symbol(id)?.name ?? id].join(' > ');
     if (pathLabel.text != path) pathLabel.text = path;
     var inSymbol = editPath.length > 0;
     if (backButton.hidden == inSymbol) backButton.hidden = !inSymbol;
-    playButton.text = playing ? 'Stop' : 'Play';
+    updateToggles();
+    if (playIconShown != playing)
+    {
+      playIconShown = playing;
+      playButton.icon = AnimatorSkin.icon(playing ? 'pause' : 'play', 18, 0xFFFFFFFF, true);
+    }
   }
 
   function renderCanvas():Void
@@ -743,10 +904,12 @@ class AnimatorState extends QOLEditorState
     stageHolder.x = viewX;
     stageHolder.y = viewY;
     stageHolder.scaleX = stageHolder.scaleY = zoom;
+    drawStageDecor();
 
     if (renderDirty)
     {
       renderDirty = false;
+      if (!playing) canvasEmpty = !hasAnyContent();
       drawChecker();
       contentHolder.removeChildren();
       var content = renderer.render(sym, frame, {collectHits: true});
@@ -794,10 +957,6 @@ class AnimatorState extends QOLEditorState
     var g = checker.graphics;
     g.clear();
     var w = doc.project.width, h = doc.project.height;
-    // Drop shadow & stage.
-    g.beginFill(0x000000, 0.35);
-    g.drawRect(6, 6, w, h);
-    g.endFill();
     if ((doc.project.bg >>> 24) == 0)
     {
       g.beginBitmapFill(checkerTile(), null, true, false);
@@ -820,6 +979,79 @@ class AnimatorState extends QOLEditorState
       g.lineTo(w / 2, h / 2 + 12);
       g.lineStyle();
     }
+  }
+
+  /**
+   * Soft shadow and a glowing frame around the stage (screen space, so they look the same at any zoom).
+   */
+  var decorKey:String = '';
+
+  function drawStageDecor():Void
+  {
+    var x = viewX, y = viewY, w = doc.project.width * zoom, h = doc.project.height * zoom;
+    var key = '$x,$y,$w,$h,$playing';
+    if (key == decorKey) return;
+    decorKey = key;
+    var g = stageDecor.graphics;
+    g.clear();
+    for (i in 0...6)
+    {
+      var grow = 2 + i * 3;
+      g.beginFill(0x07040F, 0.09);
+      g.drawRoundRect(x - grow + 5, y - grow + 9, w + grow * 2, h + grow * 2, grow * 2 + 4, grow * 2 + 4);
+      g.endFill();
+    }
+    g.lineStyle(5, 0xFF5C9D, playing ? 0.32 : 0.16);
+    g.drawRect(x - 3.5, y - 3.5, w + 7, h + 7);
+    g.lineStyle(1.5, 0xFFFFFF, 0.5);
+    g.drawRect(x - 1, y - 1, w + 2, h + 2);
+    g.lineStyle();
+  }
+
+  var canvasEmpty:Bool = false;
+  /**
+   * Whether each canvas has any pixels (canvases never change once painted; painting makes a new one).
+   */
+  var canvasHasPixels:Map<String, Bool> = new Map<String, Bool>();
+
+  /**
+   * Whether anything has been drawn yet (for the "Blank canvas!" hint).
+   */
+  function hasAnyContent():Bool
+  {
+    var blankCanvases:Array<String> = [];
+    for (sy in doc.project.symbols)
+      for (l in sy.layers)
+        for (k in l.frames)
+        {
+          if (k.elements.length > 0) return true;
+          if (k.bitmap != null) blankCanvases.push(k.bitmap);
+        }
+    if (doc.project.symbols.length > 1) return true;
+    for (id in blankCanvases)
+    {
+      var known = canvasHasPixels.get(id);
+      if (known == true) return true;
+      if (known == false) continue;
+      var bmp = doc.getBitmap(id);
+      if (bmp == null) continue;
+      var r = bmp.getColorBoundsRect(0xFF000000, 0x00000000, false);
+      var has = r.width > 0 && r.height > 0;
+      // The canvas being painted right now still changes.
+      if (bmp != paintBitmap || has) canvasHasPixels.set(id, has);
+      if (has) return true;
+    }
+    return false;
+  }
+
+  function updateDecor():Void
+  {
+    var p = doc.project;
+    var label = editPath.length == 0 ? '${p.name}  \u00B7  ${p.width} x ${p.height}  \u00B7  ${p.fps} fps' : 'Editing symbol: ${sym.name}';
+    decor.setStageTag(viewX, viewY, label, workLeft + 8, QOLEditorState.MENUBAR_HEIGHT + 6, workRight - 8);
+    var cx = Math.max(workLeft + 200, Math.min(workRight - 200, viewX + p.width * zoom / 2));
+    var cy = Math.max(QOLEditorState.MENUBAR_HEIGHT + 90, Math.min(workBottom - 60, viewY + p.height * zoom / 2));
+    decor.setHint(canvasEmpty && !playing && !FlxG.mouse.pressed && editPath.length == 0, cx, cy);
   }
 
   static var _checker:Null<BitmapData> = null;
@@ -871,11 +1103,24 @@ class AnimatorState extends QOLEditorState
     if (overCanvas && (tool == 'brush' || tool == 'eraser' || tool == 'pencil'))
     {
       var size = toolSize() * zoom;
-      g.lineStyle(1, 0xFFFFFF, 0.8);
+      var paintColor = tool == 'pencil' ? strokeColor : fillColor;
+      if (tool != 'eraser' && size > 6)
+      {
+        g.beginFill(paintColor & 0xFFFFFF, 0.25);
+        g.drawCircle(lastMX, lastMY, size / 2);
+        g.endFill();
+      }
+      g.lineStyle(1.5, 0xFFFFFF, 0.9);
       g.drawCircle(lastMX, lastMY, Math.max(1, size / 2));
-      g.lineStyle(1, 0x000000, 0.5);
-      g.drawCircle(lastMX, lastMY, Math.max(1, size / 2) + 1);
+      g.lineStyle(1, 0x1A1030, 0.6);
+      g.drawCircle(lastMX, lastMY, Math.max(1, size / 2) + 1.5);
       g.lineStyle();
+      if (tool != 'eraser')
+      {
+        g.beginFill(paintColor & 0xFFFFFF, 1);
+        g.drawCircle(lastMX, lastMY, 1.8);
+        g.endFill();
+      }
     }
   }
 
@@ -1254,8 +1499,10 @@ class AnimatorState extends QOLEditorState
     cDragMoved = false;
   }
 
-  function elementOf(s:AnimSel):Null<AnimElement>
+  function elementOf(s:Null<AnimSel>):Null<AnimElement>
   {
+    // Property fields can still ask for the selection right after it was cleared.
+    if (s == null || s.layer < 0 || s.layer >= sym.layers.length) return null;
     var layer = sym.layers[s.layer];
     if (layer == null) return null;
     var key = AnimData.keyAt(layer, frame);
@@ -1897,7 +2144,7 @@ class AnimatorState extends QOLEditorState
     }
     var b = selectionBounds();
     prompt('Convert to Symbol', 'Symbol name', 'Symbol ${doc.project.symbols.length}', name -> {
-      if (name == null || name == '') return;
+      if (name == null || name == '' || selection.length == 0) return;
       doc.checkpoint();
       var layerIdx = selection[0].layer;
       var key = AnimData.keyAt(sym.layers[layerIdx], frame);
@@ -2556,12 +2803,26 @@ class AnimatorState extends QOLEditorState
   // Tools
   //
 
-  public function setTool(id:String):Void
+  public function setTool(id:String, quiet:Bool = false):Void
   {
+    var changed = tool != id;
     tool = id;
     for (tid => b in toolButtons)
-      b.selected = tid == id;
+    {
+      var on = tid == id;
+      var cls = 'anim-tool-on-$tid';
+      if (on == b.hasClass(cls) && !(on && quiet)) continue;
+      if (on) b.addClass(cls);
+      else
+        b.removeClass(cls);
+      b.icon = on ? AnimatorSkin.icon(tid, 22, 0xFFFFFFFF) : AnimatorSkin.icon(tid, 22, AnimatorSkin.TOOL_COLORS.get(tid));
+    }
     if (id != 'select') selection = [];
+    if (changed && !quiet && decor != null)
+    {
+      var t = Lambda.find(TOOLS, t -> t.id == id);
+      if (t != null) decor.showTool(id, t.name, t.key, centerX(), workBottom - 62);
+    }
     refreshProps();
   }
 
@@ -2921,6 +3182,7 @@ class AnimatorState extends QOLEditorState
     if (k.justPressed.HOME) setFrame(0);
     if (k.justPressed.END) setFrame(AnimData.symbolLength(sym) - 1);
     if (k.justPressed.DELETE || k.justPressed.BACKSPACE) deleteSelection();
+    if (k.justPressed.X) swapColors();
     if (k.justPressed.LBRACKET) adjustSize(-1);
     if (k.justPressed.RBRACKET) adjustSize(1);
     var step = k.pressed.SHIFT ? 10 : 1;

@@ -59,6 +59,8 @@ class AnimExport
   public static function formDialog(title:String, okText:String, build:QOLForm->Void, onOk:Void->Void):Void
   {
     var dialog = new Dialog();
+    dialog.addClass('anim-ui');
+    dialog.addClass('anim-popup');
     dialog.title = title;
     dialog.buttons = DialogButton.CANCEL | okText;
     dialog.destroyOnClose = true;

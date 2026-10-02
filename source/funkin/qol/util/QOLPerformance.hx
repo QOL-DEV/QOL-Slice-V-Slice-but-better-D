@@ -43,8 +43,10 @@ class QOLPerformance
     if (state == null) return false;
     #if FEATURE_HAXEUI
     if (Std.isOfType(state, funkin.qol.ui.QOLEditorState)) return true;
-    #end
     return Std.isOfType(state, funkin.qol.menu.QOLModMenuState);
+    #else
+    return false;
+    #end
   }
 
   static function onPreStateSwitch():Void

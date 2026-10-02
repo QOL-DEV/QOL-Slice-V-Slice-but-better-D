@@ -58,6 +58,20 @@ class QOLEditorState extends UIState
 
   public var menubar:MenuBar;
   public var statusLabel:Label;
+  public var statusBar:HBox;
+
+  /**
+   * CSS classes added to this editor's menus and dialogs (popups aren't inside the editor's root, so they need their own
+   * classes to pick up an editor's own look). Set it in the constructor.
+   */
+  public var popupClasses:Array<String> = [];
+
+  public function themePopup<T:haxe.ui.core.Component>(c:T):T
+  {
+    for (cls in popupClasses)
+      c.addClass(cls);
+    return c;
+  }
   public var statusRight:Label;
   public var leftPanel:Null<VBox> = null;
   public var rightPanel:Null<VBox> = null;
@@ -189,6 +203,7 @@ class QOLEditorState extends UIState
     root.addComponent(menubar);
 
     var status = new HBox();
+    statusBar = status;
     status.percentWidth = 100;
     status.height = STATUSBAR_HEIGHT;
     status.top = FlxG.height - STATUSBAR_HEIGHT;
@@ -733,7 +748,7 @@ class QOLEditorState extends UIState
 
   public function addMenu(text:String):Menu
   {
-    var menu = new Menu();
+    var menu = themePopup(new Menu());
     menu.text = text;
     menubar.addComponent(menu);
     return menu;
@@ -741,7 +756,7 @@ class QOLEditorState extends UIState
 
   public function addSubMenu(parent:Menu, text:String):Menu
   {
-    var menu = new Menu();
+    var menu = themePopup(new Menu());
     menu.text = text;
     parent.addComponent(menu);
     return menu;
@@ -803,15 +818,17 @@ class QOLEditorState extends UIState
 
   public function alert(title:String, message:String):Void
   {
-    Dialogs.messageBox(message, title, MessageBoxType.TYPE_WARNING, true);
+    var box = Dialogs.messageBox(message, title, MessageBoxType.TYPE_WARNING, true);
+    if (box != null) themePopup(box);
   }
 
   public function confirm(title:String, message:String, onYes:Void->Void, ?onNo:Void->Void):Void
   {
-    Dialogs.messageBox(message, title, MessageBoxType.TYPE_QUESTION, true, function(button) {
+    var box = Dialogs.messageBox(message, title, MessageBoxType.TYPE_QUESTION, true, function(button) {
       if (button == DialogButton.YES || button == DialogButton.OK) onYes();
       else if (onNo != null) onNo();
     });
+    if (box != null) themePopup(box);
   }
 
   /**
@@ -819,7 +836,7 @@ class QOLEditorState extends UIState
    */
   public function prompt(title:String, label:String, defaultText:String, onOk:String->Void):Void
   {
-    var dialog = new Dialog();
+    var dialog = themePopup(new Dialog());
     dialog.title = title;
     dialog.buttons = DialogButton.CANCEL | DialogButton.OK;
     dialog.defaultButton = '{{ok}}';
@@ -846,7 +863,7 @@ class QOLEditorState extends UIState
    */
   public function chooseFromList(title:String, items:Array<String>, onPick:String->Void, ?current:String):Void
   {
-    var dialog = new Dialog();
+    var dialog = themePopup(new Dialog());
     dialog.title = title;
     dialog.buttons = DialogButton.CANCEL | DialogButton.OK;
     dialog.defaultButton = '{{ok}}';

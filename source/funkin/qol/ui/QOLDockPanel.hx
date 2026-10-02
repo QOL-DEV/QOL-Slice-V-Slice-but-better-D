@@ -114,6 +114,18 @@ class QOLDockPanel extends VBox
     this.title = title;
   }
 
+  /**
+   * Restyle the panel (editors with their own look, like the Animator).
+   * @param headerBackground CSS for the title bar's background, e.g. `background: #FF5C9D #9B6BFF horizontal;`.
+   */
+  public function setSkin(body:String, border:String, headerBackground:String, titleColor:String):Void
+  {
+    styleString = 'spacing: 0; background-color: $body; border: 1px solid $border;';
+    header.styleString = '$headerBackground border-bottom: 1px solid $border; padding-left: 8px; padding-right: 3px; padding-top: 3px; spacing: 3px;';
+    titleLabel.styleString = 'color: $titleColor; font-bold: true; padding-top: 1px;';
+    scroll.styleString = 'border: none; background-color: $body; padding: 8px;';
+  }
+
   static function smallButton(text:String):Button
   {
     var b = new Button();

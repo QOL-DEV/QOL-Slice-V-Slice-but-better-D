@@ -108,6 +108,8 @@ class QOLSlice
         var b = funkin.qol.util.QOLFS.getBytes(p);
         return b == null ? null : haxe.crypto.Base64.encode(b);
       });
+      // Dev: inspect the current screen from the browser console (tests).
+      js.Syntax.code("window.qolState = {0}", function():Dynamic return FlxG.state);
       js.Syntax.code("window.qolList = {0}", function(p:String):String {
         return funkin.qol.util.QOLFS.listFilesRecursive(p).join('\n');
       });
