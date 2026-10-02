@@ -47,7 +47,7 @@ jobs:
 
       - name: Restore cached libraries
         id: cache-libs
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .haxelib
           key: qol-haxelib-${{ runner.os }}-${{ hashFiles('hmm.json') }}-v1
@@ -70,8 +70,15 @@ jobs:
           haxelib run lime rebuild windows -64 -release -nocolor
           ls -la .haxelib/lime/git/ndll/Windows64
 
+      - name: Save libraries for next time
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .haxelib
+          key: qol-haxelib-${{ runner.os }}-${{ hashFiles('hmm.json') }}-v1
+
       - name: Restore C++ compile cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .hxcpp_cache
           key: qol-hxcpp-${{ runner.os }}-${{ github.sha }}
@@ -91,6 +98,13 @@ jobs:
             echo "::error title=Build errors::$(grep -i -E 'error|fatal|undefined|unresolved|cannot|not found' build.log | grep -v -i 'warning' | head -n 60 | enc)"
             echo "::warning title=End of build log::$(tail -n 60 build.log | enc)"
           fi
+
+      - name: Save C++ compile cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .hxcpp_cache
+          key: qol-hxcpp-${{ runner.os }}-${{ github.sha }}-${{ github.run_attempt }}
 
       - name: Upload the game
         uses: actions/upload-artifact@v4
