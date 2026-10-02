@@ -87,7 +87,11 @@ jobs:
       - name: Build QOL Slice
         run: |
           set -o pipefail
-          haxelib run lime build windows -release -nocolor 2>&1 | tee build.log
+          # Some generated C++ file names are very long; build from a short drive letter so the full paths stay
+          # under Windows' 260-character limit.
+          subst Q: "$(cygpath -w "$GITHUB_WORKSPACE")"
+          cd /q/
+          haxelib run lime build windows -release -nocolor 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
       - name: Report build errors
         if: failure()
