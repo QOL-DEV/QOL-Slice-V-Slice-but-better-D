@@ -67,6 +67,11 @@ class QOLSlice
   /**
    * Called once at startup.
    */
+  /**
+   * Set while an editor uses F5-F8 for its own shortcuts (so the game's debug keys stay out of the way).
+   */
+  public static var editorOwnsFunctionKeys:Bool = false;
+
   public static function init():Void
   {
     QOLConfig.reload();
@@ -98,6 +103,14 @@ class QOLSlice
       var r = ~/[?&]qol=([A-Za-z0-9_\-]+)/;
       if (!r.match(search)) return false;
       var tool = r.matched(1);
+      // Dev: read the in-memory mod files from the browser console (tests).
+      js.Syntax.code("window.qolRead = {0}", function(p:String):String {
+        var b = funkin.qol.util.QOLFS.getBytes(p);
+        return b == null ? null : haxe.crypto.Base64.encode(b);
+      });
+      js.Syntax.code("window.qolList = {0}", function(p:String):String {
+        return funkin.qol.util.QOLFS.listFilesRecursive(p).join('\n');
+      });
       // Dev: `&fit=1` makes the game fill the browser window like a resized/maximized desktop window (tests layouts and
       // previews at window scales other than 1280x720).
       if (~/[?&]fit=1/.match(search))

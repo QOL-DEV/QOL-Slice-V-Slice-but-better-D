@@ -1,0 +1,329 @@
+package funkin.qol.editors.animator;
+
+/**
+ * The QOL Animator's document format (saved as JSON in `data/qol/animations/<name>.json`, with each bitmap saved as a
+ * PNG next to it).
+ *
+ * Works like Adobe Animate: a project has symbols, each symbol has a timeline of layers, each layer is a row of
+ * keyframes that hold elements (vector shapes, symbol instances, bitmaps). Symbol 0 is the main timeline ("Scene").
+ */
+typedef AnimProject =
+{
+  var version:Int;
+  var name:String;
+  var width:Int;
+  var height:Int;
+  var fps:Float;
+
+  /**
+   * Stage color (ARGB). Alpha 0 = transparent (shown as a checkerboard; exports keep transparency).
+   */
+  var bg:Int;
+
+  var symbols:Array<AnimSymbol>;
+  var bitmaps:Array<AnimBitmapInfo>;
+}
+
+typedef AnimSymbol =
+{
+  var id:String;
+  var name:String;
+
+  /**
+   * 'graphic' (plays in sync with the timeline it's placed on) or 'movieclip' (shown the same way here).
+   */
+  var kind:String;
+
+  var layers:Array<AnimLayer>;
+}
+
+typedef AnimBitmapInfo =
+{
+  var id:String;
+  var name:String;
+  var width:Int;
+  var height:Int;
+
+  /**
+   * True for images in the library (placed as elements); false for the canvases of bitmap layers.
+   */
+  var ?library:Bool;
+}
+
+typedef AnimLayer =
+{
+  var name:String;
+
+  /**
+   * 'vector' (shapes, symbols and placed bitmaps) or 'bitmap' (a paintable canvas per keyframe).
+   */
+  var kind:String;
+
+  var visible:Bool;
+  var locked:Bool;
+
+  /**
+   * Shown only as outlines on the canvas (Flash's outline mode).
+   */
+  var ?outline:Bool;
+
+  /**
+   * Guide layers are visible while editing but left out of exports.
+   */
+  var ?guide:Bool;
+
+  var color:Int;
+  var alpha:Float;
+  var ?blend:String;
+  var frames:Array<AnimKeyframe>;
+}
+
+typedef AnimKeyframe =
+{
+  var start:Int;
+  var duration:Int;
+  var elements:Array<AnimElement>;
+
+  /**
+   * Bitmap layers: id of this keyframe's canvas (same size as the stage).
+   */
+  var ?bitmap:String;
+
+  /**
+   * Bitmap layers: where the canvas's top-left corner is (inside symbols canvases are centered on the symbol's origin).
+   */
+  var ?bx:Float;
+
+  var ?by:Float;
+
+  /**
+   * Classic tween to the next keyframe (null = no tween).
+   */
+  var ?tween:AnimTween;
+
+  var ?label:String;
+}
+
+typedef AnimTween =
+{
+  var ease:String;
+
+  /**
+   * Extra full turns while tweening (positive = clockwise).
+   */
+  var ?spins:Int;
+}
+
+typedef AnimElement =
+{
+  /**
+   * 'shape', 'symbol', 'bitmap' or 'text'.
+   */
+  var type:String;
+
+  // Transform (a b c d tx ty), like Flash.
+  var a:Float;
+  var b:Float;
+  var c:Float;
+  var d:Float;
+  var tx:Float;
+  var ty:Float;
+
+  /**
+   * Transformation point (pivot) in the element's own coordinates.
+   */
+  var ?px:Float;
+
+  var ?py:Float;
+
+  // Color effect.
+  var ?alpha:Float;
+  var ?tint:Int;
+  var ?tintAmount:Float;
+  var ?brightness:Float;
+  var ?blend:String;
+  var ?filters:Array<AnimFilter>;
+
+  // type == 'shape'
+  var ?paths:Array<AnimPath>;
+
+  // type == 'symbol'
+  var ?symbol:String;
+
+  /**
+   * 'loop', 'once' or 'single'.
+   */
+  var ?loop:String;
+
+  var ?firstFrame:Int;
+
+  // type == 'bitmap'
+  var ?bitmap:String;
+
+  // type == 'text'
+  var ?text:String;
+  var ?font:String;
+  var ?size:Float;
+  var ?color:Int;
+  var ?boxWidth:Float;
+
+  var ?name:String;
+}
+
+typedef AnimPath =
+{
+  /**
+   * Fill color (ARGB) or null.
+   */
+  var ?fill:Null<Int>;
+
+  /**
+   * Stroke color (ARGB) or null.
+   */
+  var ?stroke:Null<Int>;
+
+  var ?width:Float;
+
+  /**
+   * Commands: 0 x y = move, 1 x y = line, 2 cx cy x y = quadratic curve, 3 c1x c1y c2x c2y x y = cubic curve,
+   * 4 = close.
+   */
+  var d:Array<Float>;
+}
+
+typedef AnimFilter =
+{
+  /**
+   * 'blur', 'glow', 'shadow' or 'adjust'.
+   */
+  var type:String;
+
+  var ?blurX:Float;
+  var ?blurY:Float;
+  var ?strength:Float;
+  var ?color:Int;
+  var ?alpha:Float;
+  var ?distance:Float;
+  var ?angle:Float;
+  var ?inner:Bool;
+  var ?knockout:Bool;
+  var ?quality:Int;
+
+  // 'adjust'
+  var ?brightness:Float;
+  var ?contrast:Float;
+  var ?saturation:Float;
+  var ?hue:Float;
+}
+
+class AnimData
+{
+  public static inline final VERSION:Int = 1;
+  public static final LAYER_COLORS:Array<Int> = [0xFF5CE1FF, 0xFFFF5C9D, 0xFF7CE38B, 0xFFFFD84A, 0xFFB59BFF, 0xFFFF9F43, 0xFF4DD0E1, 0xFFE57373];
+
+  public static function newProject(name:String, width:Int = 1024, height:Int = 1024, fps:Float = 24):AnimProject
+  {
+    return {
+      version: VERSION,
+      name: name,
+      width: width,
+      height: height,
+      fps: fps,
+      bg: 0x00FFFFFF,
+      symbols: [newSymbol('scene', 'Scene')],
+      bitmaps: []
+    };
+  }
+
+  public static function newSymbol(id:String, name:String, kind:String = 'graphic'):AnimSymbol
+  {
+    return {
+      id: id,
+      name: name,
+      kind: kind,
+      layers: [newLayer('Layer 1', 'vector', 0)]
+    };
+  }
+
+  public static function newLayer(name:String, kind:String, index:Int):AnimLayer
+  {
+    return {
+      name: name,
+      kind: kind,
+      visible: true,
+      locked: false,
+      color: LAYER_COLORS[index % LAYER_COLORS.length],
+      alpha: 1,
+      frames: [{start: 0, duration: 1, elements: []}]
+    };
+  }
+
+  public static function identity(type:String):AnimElement
+  {
+    return {
+      type: type,
+      a: 1,
+      b: 0,
+      c: 0,
+      d: 1,
+      tx: 0,
+      ty: 0
+    };
+  }
+
+  /**
+   * Last frame (exclusive) of a layer.
+   */
+  public static function layerLength(layer:AnimLayer):Int
+  {
+    var end = 0;
+    for (k in layer.frames)
+      if (k.start + k.duration > end) end = k.start + k.duration;
+    return end;
+  }
+
+  public static function symbolLength(symbol:AnimSymbol):Int
+  {
+    var end = 1;
+    for (l in symbol.layers)
+    {
+      var e = layerLength(l);
+      if (e > end) end = e;
+    }
+    return end;
+  }
+
+  /**
+   * The keyframe covering `frame`, or null if the layer ends before it.
+   */
+  public static function keyAt(layer:AnimLayer, frame:Int):Null<AnimKeyframe>
+  {
+    for (k in layer.frames)
+      if (frame >= k.start && frame < k.start + k.duration) return k;
+    return null;
+  }
+
+  public static function keyIndexAt(layer:AnimLayer, frame:Int):Int
+  {
+    for (i in 0...layer.frames.length)
+    {
+      var k = layer.frames[i];
+      if (frame >= k.start && frame < k.start + k.duration) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Deep copy through JSON (elements, keyframes...).
+   */
+  public static inline function copy<T>(value:T):T
+    return haxe.Json.parse(haxe.Json.stringify(value));
+
+  static var idCounter:Int = 0;
+
+  public static function makeId(prefix:String):String
+  {
+    idCounter++;
+    return '$prefix-${StringTools.hex(Std.int(Date.now().getTime() / 1000) & 0xFFFFFF, 6)}${StringTools.hex(idCounter, 3)}${StringTools.hex(Std.random(0xFFF), 3)}'.toLowerCase();
+  }
+}

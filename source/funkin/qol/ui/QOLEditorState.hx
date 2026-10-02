@@ -980,7 +980,7 @@ class QOLEditorState extends UIState
     {
       if (ctrl() && FlxG.keys.justPressed.S) doSave();
       if (FlxG.keys.justPressed.F1) openGuide();
-      if (FlxG.keys.justPressed.F5)
+      if (FlxG.keys.justPressed.F5 && !QOLSlice.editorOwnsFunctionKeys)
       {
         ModWorkspace.reloadGameData();
         notify('Reloaded', 'All mods and data were reloaded.');

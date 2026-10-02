@@ -968,7 +968,7 @@ class ModchartEditorState extends QOLEditorState
   function rebuildInspector():Void
   {
     if (inspectorBox == null) return;
-    inspectorBox.removeAllComponents();
+    inspectorBox.removeAllComponents(false);
     inspectorForm = new QOLForm(130, 250);
     var form = inspectorForm;
     inspectorBefore = doc.snapshot();

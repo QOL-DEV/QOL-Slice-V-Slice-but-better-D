@@ -230,6 +230,8 @@ class Main extends Sprite
   function handleDebugDisplayKeys():Void
   {
     if (PlayerSettings.player1.controls == null || !PlayerSettings.player1.controls.check(DEBUG_DISPLAY)) return;
+    // QOL Slice: editors that use the function keys themselves (the Animator's F5/F6/F7) turn this off.
+    if (funkin.qol.QOLSlice.editorOwnsFunctionKeys) return;
 
     var nextMode:DebugDisplayMode;
 

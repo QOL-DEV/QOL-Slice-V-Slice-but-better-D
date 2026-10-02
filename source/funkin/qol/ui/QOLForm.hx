@@ -157,7 +157,7 @@ class QOLForm extends VBox
     fit(field, () -> controlWidth);
     if (placeholder != null) field.placeholder = placeholder;
     field.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || (field.text ?? '') == (get() ?? '')) return;
       set(field.text ?? '');
       changed();
     };
@@ -176,7 +176,7 @@ class QOLForm extends VBox
     fit(field, () -> labelText == null ? labelWidth + controlWidth + 6 : controlWidth);
     field.height = height;
     field.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || (field.text ?? '') == (get() ?? '')) return;
       set(field.text ?? '');
       changed();
     };
@@ -203,6 +203,8 @@ class QOLForm extends VBox
       if (refreshing) return;
       var v:Null<Float> = stepper.pos;
       if (v == null || Math.isNaN(v)) return;
+      // HaxeUI reports changes made by `refresh` a moment later; only pass on real edits.
+      if (v == get()) return;
       set(v);
       changed();
     };
@@ -236,12 +238,12 @@ class QOLForm extends VBox
       hbox.addComponent(s);
     }
     a.onChange = function(_) {
-      if (refreshing || a.pos == null) return;
+      if (refreshing || a.pos == null || a.pos == getA()) return;
       setA(a.pos);
       changed();
     };
     b.onChange = function(_) {
-      if (refreshing || b.pos == null) return;
+      if (refreshing || b.pos == null || b.pos == getB()) return;
       setB(b.pos);
       changed();
     };
@@ -261,7 +263,7 @@ class QOLForm extends VBox
     var box = new CheckBox();
     box.text = '';
     box.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || box.selected == (get() == true)) return;
       set(box.selected);
       changed();
     };
@@ -282,7 +284,7 @@ class QOLForm extends VBox
     s.max = max;
     s.step = step;
     s.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || s.pos == get()) return;
       set(s.pos);
       changed();
     };
@@ -332,7 +334,7 @@ class QOLForm extends VBox
     dd.onChange = function(_) {
       if (refreshing || building) return;
       var item = dd.selectedItem;
-      if (item == null) return;
+      if (item == null || item.value == get()) return;
       set(item.value);
       changed();
     };
@@ -378,7 +380,9 @@ class QOLForm extends VBox
       var raw:Dynamic = picker.selectedItem;
       if (raw == null) return;
       var c:Color = raw;
-      set(0xFF000000 | (c.r << 16) | (c.g << 8) | c.b);
+      var next = 0xFF000000 | (c.r << 16) | (c.g << 8) | c.b;
+      if ((next & 0xFFFFFF) == (get() & 0xFFFFFF)) return;
+      set(next);
       changed();
     };
     refreshers.push(sync);
@@ -459,7 +463,7 @@ class QOLForm extends VBox
     hbox.addComponent(field);
     hbox.addComponent(btn);
     field.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || (field.text ?? '') == (get() ?? '')) return;
       set(field.text ?? '');
       changed();
     };

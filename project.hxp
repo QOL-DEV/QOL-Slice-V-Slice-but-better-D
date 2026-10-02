@@ -1305,6 +1305,7 @@ class Project extends HXProject
     addHaxelib('polymod'); // Modding framework
     addHaxelib('flixel-animate'); // Texture atlas rendering
 
+    addHaxelib('format'); // File formats (PNG decoding in the QOL Animator)
     addHaxelib('json2object'); // JSON parsing
     addHaxelib('jsonpath'); // JSON parsing
     addHaxelib('jsonpatch'); // JSON parsing

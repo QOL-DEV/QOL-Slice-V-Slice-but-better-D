@@ -20,6 +20,7 @@ class QOLToolFactory
       case 'stage': new funkin.qol.editors.BackgroundEditorState();
       case 'chart': new funkin.qol.editors.QOLChartEditorState();
       case 'modchart': new funkin.qol.editors.ModchartEditorState();
+      case 'animator': new funkin.qol.editors.animator.AnimatorState();
       default: null;
     }
   }
