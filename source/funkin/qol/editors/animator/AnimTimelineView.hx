@@ -112,14 +112,14 @@ class AnimTimelineView extends FlxGroup
       b.draw(sh, null, null, null, null, true);
       return b;
     });
-    gTag = QOLTheme.cached('anim-playhead-tag', () -> QOLTheme.drawRound(34, RULER_H - 4, 0xFFFF5C9D, 8, 0xFFFFB3D1, 1.5));
+    gTag = tagGraphic();
 
-    bg = rect(0xFF140F26);
-    labelBg = rect(0xFF1B1533);
-    rulerBg = rect(0xFF221A40);
-    divider = rect(0xFF3D3366);
-    playheadGlow = rect(0xFFFF5C9D);
-    playhead = rect(0xFFFF5C9D);
+    bg = rect(AnimatorSkin.TL_BG);
+    labelBg = rect(AnimatorSkin.TL_LABELS);
+    rulerBg = rect(AnimatorSkin.TL_RULER);
+    divider = rect(AnimatorSkin.BORDER);
+    playheadGlow = rect(AnimatorSkin.ACCENT);
+    playhead = rect(AnimatorSkin.ACCENT);
     playheadTag = prep(new FlxSprite().loadGraphic(gTag));
     playheadText = QOLTheme.text(0, 0, 34, '', 11, QOLTheme.FONT_TITLE, FlxColor.WHITE);
     playheadText.alignment = CENTER;
@@ -144,6 +144,33 @@ class AnimTimelineView extends FlxGroup
     add(playhead);
     add(playheadTag);
     add(playheadText);
+  }
+
+  static function tagGraphic():FlxGraphic
+  {
+    var c = AnimatorSkin.ACCENT;
+    return QOLTheme.cached('anim-playhead-tag-${StringTools.hex(c, 8)}', () -> QOLTheme.drawRound(34, RULER_H - 4, c, 8, AnimatorSkin.lighten(c, 0.5), 1.5));
+  }
+
+  var themeVersion:Int = -1;
+
+  /**
+   * Pick up the current theme's colors (cheap; called every redraw).
+   */
+  function applyTheme():Void
+  {
+    if (themeVersion == AnimatorSkin.version) return;
+    themeVersion = AnimatorSkin.version;
+    bg.color = AnimatorSkin.TL_BG;
+    labelBg.color = AnimatorSkin.TL_LABELS;
+    rulerBg.color = AnimatorSkin.TL_RULER;
+    divider.color = AnimatorSkin.BORDER;
+    playhead.color = playheadGlow.color = AnimatorSkin.ACCENT;
+    gTag = tagGraphic();
+    playheadTag.loadGraphic(gTag);
+    playheadText.color = AnimatorSkin.ON_ACCENT;
+    title.color = AnimatorSkin.ACCENT_TEXT;
+    subtitle.color = AnimatorSkin.TEXT_DIM;
   }
 
   static function circleBitmap(size:Int, line:Int, fill:Int, filled:Bool):BitmapData
@@ -300,6 +327,7 @@ class AnimTimelineView extends FlxGroup
   public function redraw():Void
   {
     nSpan = nKey = nText = nIcon = nGrid = nRow = 0;
+    applyTheme();
     var sym = ed.sym;
     place(bg, x, y, width, height);
     place(labelBg, x, y, LABEL_W, height);
@@ -339,8 +367,8 @@ class AnimTimelineView extends FlxGroup
       var major = (f + 1) % 5 == 0 || f == 0;
       var line = pooled(gridLines, nGrid++, layerGrid, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
       place(line, fx + cellW / 2, y + (major ? RULER_H - 7 : RULER_H - 4), 1, (major ? 7 : 4));
-      line.color = major ? 0xFF8C80BF : 0xFF4A3F78;
-      if (major && f != ed.frame) txt(fx + cellW / 2 - 15, y + 5, 30, '${f + 1}', 10, 0xFFA99CD6, true, true);
+      line.color = major ? AnimatorSkin.TEXT_DIM : AnimatorSkin.BORDER_LIGHT;
+      if (major && f != ed.frame) txt(fx + cellW / 2 - 15, y + 5, 30, '${f + 1}', 10, AnimatorSkin.TEXT_DIM, true, true);
     }
 
     // Layers.
@@ -353,7 +381,7 @@ class AnimTimelineView extends FlxGroup
       var ry = rowY(li);
       if (ry + ROW_H > bottom + 1) break;
       var selected = li == ed.curLayer;
-      var baseBg:Int = r % 2 == 0 ? 0xFF181230 : 0xFF1C1636;
+      var baseBg:Int = r % 2 == 0 ? AnimatorSkin.TL_ROW_A : AnimatorSkin.TL_ROW_B;
       var rowColor:Int = selected ? mix(baseBg, layer.color, 0.22) : baseBg;
       var rowBg = pooled(rowBgs, nRow++, layerRows, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
       place(rowBg, x, ry, width, ROW_H - 1);
@@ -363,7 +391,7 @@ class AnimTimelineView extends FlxGroup
       span(x + 4, ry + 3, 4, ROW_H - 7, layer.color);
       if (selected) span(x + 8, ry + 3, 2, ROW_H - 7, layer.color, 0.35);
       icon(layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen), x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
-      txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? 0xFFC9C2E6 : 0xFF6E6497));
+      txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? AnimatorSkin.TEXT_SOFT : AnimatorSkin.TEXT_FAINT));
       icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 60, ry + 5);
       icon(layer.locked ? gLockOn : gLockOff, x + LABEL_W - 41, ry + 5);
       icon(layer.outline == true ? gOutline : gSquare, x + LABEL_W - 22, ry + 5, layer.color);
@@ -383,7 +411,7 @@ class AnimTimelineView extends FlxGroup
         var kw = k.duration * cellW;
         if (kx > x + width || kx + kw < gridX) continue;
         var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null);
-        var color:FlxColor = k.tween != null ? mix(rowColor, 0xFF9B6BFF, 0.55) : (has ? mix(rowColor, layer.color, 0.32) : mix(rowColor, 0xFF3D3366, 0.5));
+        var color:FlxColor = k.tween != null ? mix(rowColor, AnimatorSkin.ACCENT2, 0.55) : (has ? mix(rowColor, layer.color, 0.32) : mix(rowColor, AnimatorSkin.BORDER, 0.5));
         var sx = Math.max(gridX, kx + 1);
         var ex = Math.min(x + width, kx + kw);
         if (ex > sx) span(sx, ry + 3, ex - sx - 1, ROW_H - 7, color);
@@ -423,12 +451,12 @@ class AnimTimelineView extends FlxGroup
     if (nextRow >= scrollRow && ny + ROW_H <= bottom)
     {
       var hoverNew = contains(mx, my) && mx < gridX && rowAt(my) == nextRow && drag == '';
-      if (hoverNew) span(x, ny, LABEL_W, ROW_H - 1, 0xFFFF5C9D, 0.18);
-      txt(x + 14, ny + 4, LABEL_W - 20, '+  New layer', 12, hoverNew ? 0xFFFFFFFF : 0xFFFF8FC0);
+      if (hoverNew) span(x, ny, LABEL_W, ROW_H - 1, AnimatorSkin.ACCENT, 0.18);
+      txt(x + 14, ny + 4, LABEL_W - 20, '+  New layer', 12, hoverNew ? 0xFFFFFFFF : AnimatorSkin.ACCENT_TEXT);
       if (ny + ROW_H * 2.5 <= bottom)
         txt(gridX + 12, bottom - 22, width - LABEL_W - 24,
           'Drag keyframes to move them  \u00B7  Right-click frames for more  \u00B7  Double-click a layer to rename it  \u00B7  Ctrl + wheel zooms the timeline', 10,
-          0xFF5E5488);
+          AnimatorSkin.TEXT_FAINT);
     }
 
     // Symbol end.

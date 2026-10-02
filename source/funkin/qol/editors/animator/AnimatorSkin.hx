@@ -10,6 +10,26 @@ import openfl.display.Shape;
 import openfl.geom.ColorTransform;
 import openfl.geom.Matrix;
 
+typedef AnimTheme =
+{
+  var name:String;
+
+  /**
+   * Main highlight (buttons pressed, playhead, selected tab...).
+   */
+  var accent:Int;
+
+  /**
+   * Second color, for gradients.
+   */
+  var accent2:Int;
+
+  /**
+   * Background: panels take its hue (their brightness stays dark).
+   */
+  var base:Int;
+}
+
 /**
  * The Animator's look: a purple/pink theme matching the Mod Menu (scoped to the Animator's screen), hand-drawn vector
  * icons for tools and buttons, and the color palettes.
@@ -18,20 +38,176 @@ import openfl.geom.Matrix;
  */
 class AnimatorSkin
 {
-  // Palette.
-  public static inline final BG_TOP:Int = 0xFF241A46;
-  public static inline final BG_BOTTOM:Int = 0xFF120D24;
-  public static inline final PANEL:Int = 0xFF1E1838;
-  public static inline final PANEL_DARK:Int = 0xFF16112B;
-  public static inline final BORDER:Int = 0xFF3D3366;
+  // Fixed colors (meaning, not theme).
   public static inline final INK:Int = 0xFF1A1030;
-  public static inline final PINK:Int = 0xFFFF5C9D;
-  public static inline final PURPLE:Int = 0xFF9B6BFF;
   public static inline final CYAN:Int = 0xFF5CE1FF;
   public static inline final YELLOW:Int = 0xFFFFD84A;
   public static inline final GREEN:Int = 0xFF6BE38E;
-  public static inline final TEXT:Int = 0xFFEDE6FF;
-  public static inline final TEXT_DIM:Int = 0xFFA99CD6;
+  public static inline final PURPLE:Int = 0xFF9B6BFF;
+
+  /**
+   * Ready-made themes. Any colors work: the panels take the background color's hue and keep their own brightness.
+   */
+  public static final PRESETS:Array<AnimTheme> = [
+    {name: 'Bubblegum', accent: 0xFFFF5C9D, accent2: 0xFF9B6BFF, base: 0xFF1E1838},
+    {name: 'Boyfriend', accent: 0xFF31B0D1, accent2: 0xFF4C8DFF, base: 0xFF142238},
+    {name: 'Girlfriend', accent: 0xFFE0306E, accent2: 0xFFFF8A4C, base: 0xFF2A1420},
+    {name: 'Pico', accent: 0xFFB7D855, accent2: 0xFF3CCB8F, base: 0xFF15261C},
+    {name: 'Daddy Dearest', accent: 0xFFAF66CE, accent2: 0xFFE0306E, base: 0xFF22142C},
+    {name: 'Spooky Month', accent: 0xFFFF8A3D, accent2: 0xFF9B6BFF, base: 0xFF1E1626},
+    {name: 'Senpai', accent: 0xFFFFAA6F, accent2: 0xFFFF6FA8, base: 0xFF2A1A20},
+    {name: 'Tankman', accent: 0xFFE8B04A, accent2: 0xFF9AA85A, base: 0xFF22201A},
+    {name: 'Ocean', accent: 0xFF35D4BE, accent2: 0xFF4C8DFF, base: 0xFF10222A},
+    {name: 'Midnight', accent: 0xFFE8E4F4, accent2: 0xFF8C88A0, base: 0xFF18181C}
+  ];
+
+  public static var theme(default, null):AnimTheme = PRESETS[0];
+
+  // Colors worked out from the theme (see `derive`).
+  public static var ACCENT:Int = 0xFFFF5C9D;
+  public static var ACCENT2:Int = 0xFF9B6BFF;
+
+  /**
+   * Text on top of the accent color (white, or ink when the accent is very light).
+   */
+  public static var ON_ACCENT:Int = 0xFFFFFFFF;
+
+  public static var ACCENT_TEXT:Int = 0xFFFF8FC0;
+  public static var BG_TOP:Int = 0xFF241A46;
+  public static var BG_BOTTOM:Int = 0xFF120D24;
+  public static var PANEL:Int = 0xFF1E1838;
+  public static var FIELD:Int = 0xFF15112A;
+  public static var SURFACE:Int = 0xFF2C2354;
+  public static var BORDER:Int = 0xFF3D3366;
+  public static var BORDER_LIGHT:Int = 0xFF54479A;
+  public static var BUTTON_TOP:Int = 0xFF3A2F6B;
+  public static var BUTTON_BOTTOM:Int = 0xFF2A2252;
+  public static var TEXT:Int = 0xFFEDE6FF;
+  public static var TEXT_SOFT:Int = 0xFFDCD3FF;
+  public static var TEXT_DIM:Int = 0xFFA99CD6;
+  public static var TEXT_FAINT:Int = 0xFF5E5488;
+  public static var TL_BG:Int = 0xFF140F26;
+  public static var TL_LABELS:Int = 0xFF1B1533;
+  public static var TL_RULER:Int = 0xFF221A40;
+  public static var TL_ROW_A:Int = 0xFF181230;
+  public static var TL_ROW_B:Int = 0xFF1C1636;
+
+  /**
+   * Bumped whenever the theme changes, so cached graphics can include it in their keys.
+   */
+  public static var version(default, null):Int = 0;
+
+  /**
+   * The saved theme (Animator preferences).
+   */
+  public static function loadSaved():Void
+  {
+    var saved:String = QOLConfig.getPref('animator.theme', '');
+    var parts = saved.split(',');
+    if (parts.length >= 3)
+    {
+      var t:AnimTheme = {
+        name: parts.length > 3 ? parts.slice(3).join(',') : 'Custom',
+        accent: parseHex(parts[0], PRESETS[0].accent),
+        accent2: parseHex(parts[1], PRESETS[0].accent2),
+        base: parseHex(parts[2], PRESETS[0].base)
+      };
+      applyTheme(t, false);
+    }
+    else
+    {
+      applyTheme(PRESETS[0], false);
+    }
+  }
+
+  static function parseHex(s:String, def:Int):Int
+  {
+    var v = Std.parseInt('0x' + StringTools.trim(s));
+    return v == null ? def : (v | 0xFF000000);
+  }
+
+  /**
+   * Switch theme: works out every color, restyles the Animator's widgets, and saves it if `save`.
+   */
+  public static function applyTheme(t:AnimTheme, save:Bool = true):Void
+  {
+    theme = {
+      name: t.name,
+      accent: t.accent | 0xFF000000,
+      accent2: t.accent2 | 0xFF000000,
+      base: t.base | 0xFF000000
+    };
+    derive();
+    version++;
+    loadCss(true);
+    if (save)
+      QOLConfig.setPref('animator.theme', '${StringTools.hex(theme.accent & 0xFFFFFF, 6)},${StringTools.hex(theme.accent2 & 0xFFFFFF, 6)},'
+        + '${StringTools.hex(theme.base & 0xFFFFFF, 6)},${theme.name}');
+  }
+
+  static function derive():Void
+  {
+    ACCENT = theme.accent;
+    ACCENT2 = theme.accent2;
+    ON_ACCENT = luminance(ACCENT) > 0.72 ? INK : 0xFFFFFFFF;
+    ACCENT_TEXT = luminance(ACCENT) < 0.35 ? lighten(ACCENT, 0.45) : lighten(ACCENT, 0.2);
+    var hsl = toHsl(theme.base);
+    var h = hsl[0];
+    var sat = Math.min(0.6, hsl[1]);
+    inline function tone(l:Float, sMul:Float = 1):Int
+      return fromHsl(h, Math.min(1, sat * sMul), l);
+    PANEL = tone(0.157);
+    FIELD = tone(0.116, 1.05);
+    SURFACE = tone(0.233, 1.02);
+    BG_TOP = tone(0.188, 1.15);
+    BG_BOTTOM = tone(0.096, 1.17);
+    BORDER = tone(0.30, 0.82);
+    BORDER_LIGHT = tone(0.44, 0.92);
+    BUTTON_TOP = tone(0.30, 0.97);
+    BUTTON_BOTTOM = tone(0.227, 1.02);
+    TEXT = tone(0.95, 2.5);
+    TEXT_SOFT = tone(0.91, 2.5);
+    TEXT_DIM = tone(0.73, 1.08);
+    TEXT_FAINT = tone(0.43, 0.6);
+    TL_BG = tone(0.104, 1.08);
+    TL_LABELS = tone(0.14, 1.05);
+    TL_RULER = tone(0.176, 1.05);
+    TL_ROW_A = tone(0.13, 1.05);
+    TL_ROW_B = tone(0.15, 1.05);
+  }
+
+  public static function luminance(c:Int):Float
+    return (0.2126 * ((c >> 16) & 0xFF) + 0.7152 * ((c >> 8) & 0xFF) + 0.0722 * (c & 0xFF)) / 255;
+
+  public static function toHsl(c:Int):Array<Float>
+  {
+    var r = ((c >> 16) & 0xFF) / 255, g = ((c >> 8) & 0xFF) / 255, b = (c & 0xFF) / 255;
+    var max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+    var l = (max + min) / 2;
+    if (max == min) return [0, 0, l];
+    var d = max - min;
+    var s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    var hue = if (max == r) (g - b) / d + (g < b ? 6 : 0) else if (max == g) (b - r) / d + 2 else (r - g) / d + 4;
+    return [hue * 60, s, l];
+  }
+
+  public static function fromHsl(h:Float, s:Float, l:Float):Int
+  {
+    function f(n:Float):Int
+    {
+      var k = (n + h / 30) % 12;
+      var a = s * Math.min(l, 1 - l);
+      var v = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+      return Std.int(Math.max(0, Math.min(255, Math.round(v * 255))));
+    }
+    return 0xFF000000 | (f(0) << 16) | (f(8) << 8) | f(4);
+  }
+
+  /**
+   * CSS color for a value (e.g. `#FF5C9D`).
+   */
+  public static function css(c:Int):String
+    return '#' + StringTools.hex(c & 0xFFFFFF, 6);
 
   /**
    * Each tool's tile color (like the Mod Menu's tiles).
@@ -69,96 +245,114 @@ class AnimatorSkin
   //
 
   static var cssLoaded:Bool = false;
+  static var cssVersion:Int = 0;
 
-  public static function loadCss():Void
+  /**
+   * Load (or with `force`, rebuild) the Animator's stylesheet from the current theme.
+   */
+  public static function loadCss(force:Bool = false):Void
   {
-    if (cssLoaded) return;
+    if (cssLoaded && !force) return;
+    if (!cssLoaded && !force)
+    {
+      // First use: the saved theme decides the colors.
+      cssLoaded = true;
+      loadSaved();
+      return;
+    }
     cssLoaded = true;
-    var css = new StringBuf();
-    css.add('
-.anim-ui .label { color: #DCD3FF; }
+    var c = css;
+    var accLight = lighten(ACCENT, 0.2), accDark = darken(ACCENT, 0.15), accPale = lighten(ACCENT, 0.55), on = css(ON_ACCENT);
+    var btnHoverTop = lighten(BUTTON_TOP, 0.1), btnHoverBottom = lighten(BUTTON_BOTTOM, 0.06);
+    var out = new StringBuf();
+    // HaxeUI skips stylesheets it has seen before, so every version is unique.
+    out.add('/* qol animator theme ${++cssVersion} */\n');
+    out.add('
+.anim-ui .label { color: ${c(TEXT_SOFT)}; }
 .anim-ui .button {
-  background: #3A2F6B #2A2252 vertical; color: #EDE6FF; border: 1px solid #54479A; border-radius: 7px;
+  background: ${c(BUTTON_TOP)} ${c(BUTTON_BOTTOM)} vertical; color: ${c(TEXT)}; border: 1px solid ${c(BORDER_LIGHT)}; border-radius: 7px;
 }
-.anim-ui .button:hover { background: #4A3C85 #352A63 vertical; border: 1px solid #FF7FB4; color: #FFFFFF; }
-.anim-ui .button:down { background: #FF6FA8 #D9407E vertical; border: 1px solid #FFB3D1; color: #FFFFFF; }
-.anim-ui .button:disabled { background: #2A2445 #241E3B vertical; color: #6E6497; border: 1px solid #3A3260; }
-.anim-ui .dropdown { background: #2A2252 #221B45 vertical; border: 1px solid #54479A; border-radius: 7px; color: #EDE6FF; }
-.anim-ui .dropdown:hover { border: 1px solid #FF7FB4; }
+.anim-ui .button:hover { background: ${c(btnHoverTop)} ${c(btnHoverBottom)} vertical; border: 1px solid ${c(accLight)}; color: #FFFFFF; }
+.anim-ui .button:down { background: ${c(accLight)} ${c(accDark)} vertical; border: 1px solid ${c(accPale)}; color: $on; }
+.anim-ui .button:disabled { background: ${c(BUTTON_BOTTOM)} ${c(PANEL)} vertical; color: ${c(TEXT_FAINT)}; border: 1px solid ${c(BORDER)}; }
+.anim-ui .dropdown { background: ${c(BUTTON_BOTTOM)} ${c(darken(BUTTON_BOTTOM, 0.12))} vertical; border: 1px solid ${c(BORDER_LIGHT)}; border-radius: 7px; color: ${c(TEXT)}; }
+.anim-ui .dropdown:hover { border: 1px solid ${c(accLight)}; }
 .anim-ui .textfield, .anim-ui .textarea {
-  background-color: #15112A; color: #F4EFFF; border: 1px solid #4A3F85; border-radius: 6px; filter: none;
+  background-color: ${c(FIELD)}; color: ${c(TEXT)}; border: 1px solid ${c(BORDER_LIGHT)}; border-radius: 6px; filter: none;
 }
-.anim-ui .textfield:active, .anim-ui .textarea:active { border: 1px solid #FF7FB4; }
+.anim-ui .textfield:active, .anim-ui .textarea:active { border: 1px solid ${c(accLight)}; }
 .anim-ui .number-stepper { border-radius: 6px; }
-.anim-ui .checkbox { color: #DCD3FF; }
-.anim-ui .checkbox-value { background-color: #15112A; border: 1px solid #54479A; border-radius: 5px; filter: none; }
-.anim-ui .checkbox-value:hover { border: 1px solid #FF7FB4; }
-.anim-ui .checkbox-value:selected { background-color: #FF5C9D; border: 1px solid #FFB3D1; }
-.anim-ui .horizontal-range { background: #15112A #1D1738 vertical; border: 1px solid #3D3366; border-radius: 5px; filter: none; }
-.anim-ui .horizontal-range .range-value { background: #FF5C9D #9B6BFF horizontal; border-radius: 4px; }
-.anim-ui .horizontal-slider .button { background: #FFFFFF #E3DBFF vertical; border: 1px solid #FF5C9D; border-radius: 6px; width: 12px; height: 18px; }
+.anim-ui .checkbox { color: ${c(TEXT_SOFT)}; }
+.anim-ui .checkbox-value { background-color: ${c(FIELD)}; border: 1px solid ${c(BORDER_LIGHT)}; border-radius: 5px; filter: none; }
+.anim-ui .checkbox-value:hover { border: 1px solid ${c(accLight)}; }
+.anim-ui .checkbox-value:selected { background-color: ${c(ACCENT)}; border: 1px solid ${c(accPale)}; }
+.anim-ui .horizontal-range { background: ${c(FIELD)} ${c(PANEL)} vertical; border: 1px solid ${c(BORDER)}; border-radius: 5px; filter: none; }
+.anim-ui .horizontal-range .range-value { background: ${c(ACCENT)} ${c(ACCENT2)} horizontal; border-radius: 4px; }
+.anim-ui .horizontal-slider .button { background: #FFFFFF ${c(TEXT_SOFT)} vertical; border: 1px solid ${c(ACCENT)}; border-radius: 6px; width: 12px; height: 18px; }
 .anim-ui .horizontal-slider:active .button { border: 1px solid #FFFFFF; }
-.anim-ui .section-header .label { color: #FF8FC0; font-bold: true; }
-.anim-ui .section-header .line { background-color: #3D3366; border-color: #3D3366; }
-.anim-ui .tabbar { border-bottom-color: #3D3366; }
-.anim-ui .tabbar > .tabbar-contents { border-bottom-color: #3D3366; }
+.anim-ui .section-header .label { color: ${c(ACCENT_TEXT)}; font-bold: true; }
+.anim-ui .section-header .line { background-color: ${c(BORDER)}; border-color: ${c(BORDER)}; }
+.anim-ui .tabbar { border-bottom-color: ${c(BORDER)}; }
+.anim-ui .tabbar > .tabbar-contents { border-bottom-color: ${c(BORDER)}; }
 .anim-ui .tabbar-button {
-  background: #221B42 #1C1638 vertical; color: #A99CD6; border: 1px solid #3D3366; border-radius: 0px; border-top: 2px solid #2E2558;
+  background: ${c(lighten(PANEL, 0.03))} ${c(PANEL)} vertical; color: ${c(TEXT_DIM)}; border: 1px solid ${c(BORDER)}; border-radius: 0px; border-top: 2px solid ${c(BUTTON_BOTTOM)};
 }
-.anim-ui .tabbar-button:hover { background: #2C2354 #241D47 vertical; color: #FFFFFF; }
+.anim-ui .tabbar-button:hover { background: ${c(SURFACE)} ${c(lighten(PANEL, 0.05))} vertical; color: #FFFFFF; }
 .anim-ui .tabbar-button-selected, .anim-ui .tabbar-button-selected:hover {
-  background: #2C2354 #2C2354 vertical; color: #FFFFFF; border: 1px solid #3D3366; border-top: 2px solid #FF5C9D; border-bottom-color: #2C2354;
+  background: ${c(SURFACE)} ${c(SURFACE)} vertical; color: #FFFFFF; border: 1px solid ${c(BORDER)}; border-top: 2px solid ${c(ACCENT)}; border-bottom-color: ${c(SURFACE)};
 }
 .anim-ui .tabbar-button-selected .label { color: #FFFFFF; }
-.anim-ui .tabview > .tabview-content { background-color: #2C2354; border: 1px solid #3D3366; }
-.anim-ui .listview { background-color: #15112A; border: 1px solid #3D3366; border-radius: 6px; }
-.anim-ui .listview .even, .anim-ui .listview .odd { background-color: #15112A; }
-.anim-ui .listview .even:hover, .anim-ui .listview .odd:hover { background-color: #2A2252; }
-.anim-ui .listview .listview-contents > .itemrenderer:selected { background-color: #FF5C9D; }
-.anim-ui .listview .listview-contents > .itemrenderer:selected .label { color: #FFFFFF; }
-.anim-ui .menubar { background: #2A1F52 #1D1638 vertical; border-bottom: 1px solid #3D3366; }
-.anim-ui .menubar-button { background-color: #2A1F52; color: #EDE6FF; }
-.anim-ui .menubar-button:hover { background-color: #FF5C9D; color: #FFFFFF; }
-.anim-ui .vertical-scroll .thumb, .anim-ui .horizontal-scroll .thumb { background-color: #54479A; border: none; border-radius: 4px; }
-.anim-ui .vertical-scroll .thumb:hover, .anim-ui .horizontal-scroll .thumb:hover { background-color: #FF7FB4; }
-.anim-ui .vertical-scroll, .anim-ui .horizontal-scroll { background-color: #17122E; border: none; }
+.anim-ui .tabview > .tabview-content { background-color: ${c(SURFACE)}; border: 1px solid ${c(BORDER)}; }
+.anim-ui .listview { background-color: ${c(FIELD)}; border: 1px solid ${c(BORDER)}; border-radius: 6px; }
+.anim-ui .listview .even, .anim-ui .listview .odd { background-color: ${c(FIELD)}; }
+.anim-ui .listview .even:hover, .anim-ui .listview .odd:hover { background-color: ${c(BUTTON_BOTTOM)}; }
+.anim-ui .listview .listview-contents > .itemrenderer:selected { background-color: ${c(ACCENT)}; }
+.anim-ui .listview .listview-contents > .itemrenderer:selected .label { color: $on; }
+.anim-ui .menubar { background: ${c(lighten(BUTTON_BOTTOM, 0.02))} ${c(PANEL)} vertical; border-bottom: 1px solid ${c(BORDER)}; }
+.anim-ui .menubar-button { background-color: ${c(lighten(BUTTON_BOTTOM, 0.02))}; color: ${c(TEXT)}; }
+.anim-ui .menubar-button:hover { background-color: ${c(ACCENT)}; color: $on; }
+.anim-ui .vertical-scroll .thumb, .anim-ui .horizontal-scroll .thumb { background-color: ${c(BORDER_LIGHT)}; border: none; border-radius: 4px; }
+.anim-ui .vertical-scroll .thumb:hover, .anim-ui .horizontal-scroll .thumb:hover { background-color: ${c(accLight)}; }
+.anim-ui .vertical-scroll, .anim-ui .horizontal-scroll { background-color: ${c(FIELD)}; border: none; }
 
-.anim-ui .anim-tool { background: #2E2558 #241D47 vertical; border: 1px solid #44397A; border-radius: 9px; padding: 0px; }
-.anim-ui .anim-tool:hover { background: #3C3070 #2E2558 vertical; border: 1px solid #FFFFFF; }
+.anim-ui .anim-tool { background: ${c(lighten(BUTTON_BOTTOM, 0.04))} ${c(darken(BUTTON_BOTTOM, 0.1))} vertical; border: 1px solid ${c(lighten(BORDER, 0.06))}; border-radius: 9px; padding: 0px; }
+.anim-ui .anim-tool:hover { background: ${c(btnHoverTop)} ${c(BUTTON_BOTTOM)} vertical; border: 1px solid #FFFFFF; }
 .anim-ui .anim-icon-button { padding: 3px 6px; }
-.anim-ui .anim-play { background: #FF7FB4 #E0457F vertical; border: 1px solid #FFC2DA; border-radius: 13px; }
-.anim-ui .anim-play:hover { background: #FF96C2 #EA5A8E vertical; border: 1px solid #FFFFFF; }
-.anim-ui .anim-on { background: #FF6FA8 #C93B74 vertical; border: 1px solid #FFB3D1; }
-.anim-ui .anim-on:hover { background: #FF85B6 #D44A80 vertical; border: 1px solid #FFFFFF; }
-.anim-ui .anim-swatch { border: 2px solid #15112A; border-radius: 6px; cursor: pointer; }
+.anim-ui .anim-play { background: ${c(accLight)} ${c(accDark)} vertical; border: 1px solid ${c(accPale)}; border-radius: 13px; }
+.anim-ui .anim-play:hover { background: ${c(lighten(ACCENT, 0.3))} ${c(darken(ACCENT, 0.05))} vertical; border: 1px solid #FFFFFF; }
+.anim-ui .anim-on { background: ${c(lighten(ACCENT, 0.1))} ${c(darken(ACCENT, 0.22))} vertical; border: 1px solid ${c(accPale)}; }
+.anim-ui .anim-on:hover { background: ${c(accLight)} ${c(darken(ACCENT, 0.12))} vertical; border: 1px solid #FFFFFF; }
+.anim-ui .anim-swatch { border: 2px solid ${c(FIELD)}; border-radius: 6px; cursor: pointer; }
 .anim-ui .anim-swatch:hover { border: 2px solid #FFFFFF; }
-.anim-ui .anim-note { color: #A99CD6; font-size: 11px; }
+.anim-ui .anim-note { color: ${c(TEXT_DIM)}; font-size: 11px; }
+.anim-ui .anim-theme-chip { border-radius: 9px; padding: 4px 8px; }
 
-.menu.anim-popup { background-color: #1E1838; border: 1px solid #54479A; border-radius: 8px; padding: 4px; }
-.anim-popup .menuitem { background-color: #1E1838; border-radius: 5px; }
-.anim-popup .menuitem:hover, .anim-popup .menuitem:selected { background: #FF6FA8 #D9407E vertical; }
-.anim-popup .menuitem-label, .anim-popup .menuitem .label { color: #EDE6FF; }
-.anim-popup .menuitem-shortcut-label { color: #A99CD6; }
-.anim-popup .menuitem .label:hover, .anim-popup .menuitem .label:selected { color: #FFFFFF; }
-.anim-popup .menuseparator-line { background-color: #3D3366; }
-.dialog.anim-popup { background-color: #1E1838; border: 1px solid #6A5BB8; border-radius: 12px; padding: 0px; }
-.anim-popup .dialog-title { background: #FF5C9D #9B6BFF horizontal; border-top-left-radius: 11px; border-top-right-radius: 11px; }
-.anim-popup .dialog-title-label { color: #FFFFFF; font-bold: true; }
-.anim-popup .dialog-footer-container { background-color: #17122E; border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; }
+.menu.anim-popup { background-color: ${c(PANEL)}; border: 1px solid ${c(BORDER_LIGHT)}; border-radius: 8px; padding: 4px; }
+.anim-popup .menuitem { background-color: ${c(PANEL)}; border-radius: 5px; }
+.anim-popup .menuitem:hover, .anim-popup .menuitem:selected { background: ${c(lighten(ACCENT, 0.1))} ${c(accDark)} vertical; }
+.anim-popup .menuitem-label, .anim-popup .menuitem .label { color: ${c(TEXT)}; }
+.anim-popup .menuitem-shortcut-label { color: ${c(TEXT_DIM)}; }
+.anim-popup .menuitem .label:hover, .anim-popup .menuitem .label:selected { color: $on; }
+.anim-popup .menuseparator-line { background-color: ${c(BORDER)}; }
+.dialog.anim-popup { background-color: ${c(PANEL)}; border: 1px solid ${c(lighten(BORDER_LIGHT, 0.12))}; border-radius: 12px; padding: 0px; }
+.anim-popup .dialog-title { background: ${c(ACCENT)} ${c(ACCENT2)} horizontal; border-top-left-radius: 11px; border-top-right-radius: 11px; }
+.anim-popup .dialog-title-label { color: $on; font-bold: true; }
+.anim-popup .dialog-footer-container { background-color: ${c(FIELD)}; border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; }
 ');
     // Active tool tiles take the tool's color.
-    for (id => c in TOOL_COLORS)
+    for (id => tc in TOOL_COLORS)
     {
-      css.add('.anim-ui .anim-tool-on-$id, .anim-ui .anim-tool-on-$id:hover { background: ${hex(lighten(c, 0.18))} ${hex(darken(c, 0.12))} vertical; '
-        + 'border: 1px solid ${hex(lighten(c, 0.55))}; }\n');
+      out.add('.anim-ui .anim-tool-on-$id, .anim-ui .anim-tool-on-$id:hover { background: ${hex(lighten(tc, 0.18))} ${hex(darken(tc, 0.12))} vertical; '
+        + 'border: 1px solid ${hex(lighten(tc, 0.55))}; }\n');
     }
     // Colored action buttons.
-    for (name => c in ['cyan' => CYAN, 'green' => GREEN, 'yellow' => YELLOW, 'purple' => PURPLE, 'red' => 0xFFFF6B6B, 'pink' => PINK])
+    for (name => bc in ['cyan' => CYAN, 'green' => GREEN, 'yellow' => YELLOW, 'purple' => PURPLE, 'red' => 0xFFFF6B6B, 'pink' => 0xFFFF5C9D])
     {
-      css.add('.anim-ui .anim-btn-$name { border: 1px solid ${hex(darken(c, 0.25))}; }\n');
-      css.add('.anim-ui .anim-btn-$name:hover { background: ${hex(lighten(c, 0.05))} ${hex(darken(c, 0.2))} vertical; border: 1px solid ${hex(lighten(c, 0.5))}; color: #1A1030; }\n');
+      out.add('.anim-ui .anim-btn-$name { border: 1px solid ${hex(darken(bc, 0.25))}; }\n');
+      out.add('.anim-ui .anim-btn-$name:hover { background: ${hex(lighten(bc, 0.05))} ${hex(darken(bc, 0.2))} vertical; border: 1px solid ${hex(lighten(bc, 0.5))}; color: #1A1030; }\n');
     }
-    haxe.ui.Toolkit.styleSheet.parse(css.toString(), 'qol-animator');
+    haxe.ui.Toolkit.styleSheet.clear('qol-animator');
+    haxe.ui.Toolkit.styleSheet.parse(out.toString(), 'qol-animator', true);
   }
 
   static function hex(c:Int):String
@@ -199,6 +393,37 @@ class AnimatorSkin
    */
   public static function icon(name:String, size:Int, color:Int, outlined:Bool = true):FlxFrame
     return iconGraphic(name, size, color, outlined).imageFrame.frame;
+
+  /**
+   * A little preview of a theme's colors (for the theme presets).
+   */
+  public static function themeSwatch(t:AnimTheme):FlxFrame
+  {
+    var key = 'qol-anim-theme-${StringTools.hex(t.accent, 8)}-${StringTools.hex(t.accent2, 8)}-${StringTools.hex(t.base, 8)}';
+    return QOLTheme.cached(key, () -> {
+      var sh = new Shape();
+      var g = sh.graphics;
+      var hsl = toHsl(t.base);
+      g.beginFill(fromHsl(hsl[0], Math.min(0.6, hsl[1]), 0.2) & 0xFFFFFF, 1);
+      g.lineStyle(1, 0xFFFFFF, 0.35);
+      g.drawRoundRect(0.5, 0.5, 41, 17, 9, 9);
+      g.endFill();
+      g.lineStyle();
+      g.beginFill(t.accent & 0xFFFFFF, 1);
+      g.drawCircle(11, 9, 5.5);
+      g.endFill();
+      g.beginFill(t.accent2 & 0xFFFFFF, 1);
+      g.drawCircle(24, 9, 5.5);
+      g.endFill();
+      g.beginFill(t.base & 0xFFFFFF, 1);
+      g.lineStyle(1, 0xFFFFFF, 0.6);
+      g.drawCircle(35, 9, 4);
+      g.endFill();
+      var b = new BitmapData(43, 19, true, 0);
+      b.draw(sh, null, null, null, null, true);
+      return b;
+    }).imageFrame.frame;
+  }
 
   public static function drawIcon(name:String, size:Int, color:Int, outlined:Bool):BitmapData
   {
@@ -499,6 +724,23 @@ class AnimatorSkin
         }
         g.lineStyle();
         rect(10.6, 3, 2.8, 18, 1, 0.5);
+      case 'palette':
+        g.beginFill(c, a);
+        g.moveTo(12 * s, 2.5 * s);
+        g.curveTo(22 * s, 2.5 * s, 22 * s, 11 * s);
+        g.curveTo(22 * s, 16 * s, 17 * s, 15.5 * s);
+        g.curveTo(14 * s, 15.2 * s, 14.5 * s, 18 * s);
+        g.curveTo(15 * s, 21.5 * s, 11 * s, 21.5 * s);
+        g.curveTo(2 * s, 21.5 * s, 2 * s, 12 * s);
+        g.curveTo(2 * s, 2.5 * s, 12 * s, 2.5 * s);
+        g.endFill();
+        var dots:Array<Array<Float>> = [[7.5, 9.5, 0xFF5C9D], [12, 6.5, 0xFFD84A], [17, 8.5, 0x5CE1FF], [7, 15, 0x6BE38E]];
+        for (dot in dots)
+        {
+          g.beginFill(Std.int(dot[2]), 1);
+          g.drawCircle(dot[0] * s, dot[1] * s, 2.1 * s);
+          g.endFill();
+        }
       case 'sparkle':
         poly([12, 1.5, 14, 10, 22.5, 12, 14, 14, 12, 22.5, 10, 14, 1.5, 12, 10, 10]);
       default:

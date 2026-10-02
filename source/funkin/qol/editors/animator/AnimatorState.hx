@@ -5,6 +5,8 @@ import flixel.FlxCamera;
 import flixel.util.FlxColor;
 import funkin.qol.editors.animator.AnimData;
 import funkin.qol.editors.animator.AnimGeom;
+import funkin.qol.editors.animator.AnimatorSkin.AnimTheme;
+import haxe.ui.containers.dialogs.Dialog.DialogButton;
 import funkin.qol.ui.QOLDockPanel;
 import funkin.qol.ui.QOLEditorState;
 import funkin.qol.ui.QOLForm;
@@ -157,6 +159,7 @@ class AnimatorState extends QOLEditorState
   var loopButton:Button;
   var onionButton:Button;
   var badge:Label;
+  var themeButton:Button;
   var decor:AnimCanvasDecor;
   var stageDecor:Shape;
   var playIconShown:Null<Bool> = null;
@@ -187,7 +190,6 @@ class AnimatorState extends QOLEditorState
     QOLSlice.editorOwnsFunctionKeys = true;
     AnimatorSkin.loadCss();
     root.addClass('anim-ui');
-    camWorld.bgColor = AnimatorSkin.BG_BOTTOM;
     gridBG.visible = false;
 
     camCanvas = new FlxCamera();
@@ -243,18 +245,149 @@ class AnimatorState extends QOLEditorState
    */
   function applySkin():Void
   {
-    toolsPanel.setSkin('#1E1838', '#3D3366', 'background: #FF5C9D #FF8A4C horizontal;', '#FFFFFF');
-    inspector.setSkin('#1E1838', '#3D3366', 'background: #8F5CFF #4C8DFF horizontal;', '#FFFFFF');
-    statusBar.styleString = 'background: #261C4A #1A1434 vertical; border-top: 1px solid #3D3366; padding-left: 8px; padding-right: 8px; padding-top: 4px;';
-    statusLabel.styleString = 'color: #DCD3FF;';
-    statusRight.styleString = 'text-align: right; color: #FF8FC0;';
     badge = new Label();
     badge.text = 'QOL ANIMATOR';
     badge.width = 128;
-    badge.styleString = 'background: #FF5C9D #9B6BFF horizontal; border: 1px solid #FFB3D1; border-radius: 11px; padding-top: 4px; padding-bottom: 4px; '
-      + 'color: #FFFFFF; font-bold: true; font-size: 12px; text-align: center;';
     badge.tooltip = 'The QOL Slice Animator. Press F1 for the guide.';
     root.addComponent(badge);
+    themeButton = new Button();
+    themeButton.text = 'Theme';
+    themeButton.icon = AnimatorSkin.icon('palette', 16, 0xFFFFFFFF, true);
+    themeButton.height = 24;
+    themeButton.width = 86;
+    themeButton.addClass('anim-icon-button');
+    themeButton.tooltip = 'Change the Animator\'s colors to anything you like';
+    themeButton.onClick = _ -> openThemeDialog();
+    root.addComponent(themeButton);
+    restyle();
+  }
+
+  /**
+   * Inline styles that use theme colors (re-run when the theme changes).
+   */
+  function restyle():Void
+  {
+    var c = AnimatorSkin.css;
+    var panel = c(AnimatorSkin.PANEL), border = c(AnimatorSkin.BORDER);
+    var on = c(AnimatorSkin.ON_ACCENT);
+    toolsPanel.setSkin(panel, border, 'background: ${c(AnimatorSkin.ACCENT)} ${c(AnimatorSkin.lighten(AnimatorSkin.ACCENT, 0.25))} horizontal;', on);
+    inspector.setSkin(panel, border, 'background: ${c(AnimatorSkin.ACCENT2)} ${c(AnimatorSkin.lighten(AnimatorSkin.ACCENT2, 0.25))} horizontal;',
+      c(AnimatorSkin.luminance(AnimatorSkin.ACCENT2) > 0.72 ? AnimatorSkin.INK : 0xFFFFFFFF));
+    statusBar.styleString = 'background: ${c(AnimatorSkin.lighten(AnimatorSkin.PANEL, 0.04))} ${c(AnimatorSkin.darken(AnimatorSkin.PANEL, 0.12))} vertical; '
+      + 'border-top: 1px solid $border; padding-left: 8px; padding-right: 8px; padding-top: 4px;';
+    statusLabel.styleString = 'color: ${c(AnimatorSkin.TEXT_SOFT)};';
+    statusRight.styleString = 'text-align: right; color: ${c(AnimatorSkin.ACCENT_TEXT)};';
+    badge.styleString = 'background: ${c(AnimatorSkin.ACCENT)} ${c(AnimatorSkin.ACCENT2)} horizontal; border: 1px solid ${c(AnimatorSkin.lighten(AnimatorSkin.ACCENT, 0.55))}; '
+      + 'border-radius: 11px; padding-top: 4px; padding-bottom: 4px; color: $on; font-bold: true; font-size: 12px; text-align: center;';
+    ctrlBar.styleString = 'spacing: 4px; background: ${c(AnimatorSkin.lighten(AnimatorSkin.BUTTON_BOTTOM, 0.02))} ${c(AnimatorSkin.darken(AnimatorSkin.BUTTON_BOTTOM, 0.12))} vertical; '
+      + 'border-top: 1px solid $border; border-bottom: 1px solid $border; padding-left: 8px; padding-right: 8px; padding-top: 4px;';
+    pathLabel.styleString = 'color: ${c(AnimatorSkin.ACCENT_TEXT)}; font-bold: true; padding-top: 6px; padding-right: 4px;';
+    frameLabel.styleString = 'background-color: ${c(AnimatorSkin.FIELD)}; border: 1px solid $border; border-radius: 12px; color: #9FE8FF; padding-top: 5px; '
+      + 'padding-bottom: 5px; text-align: center; font-bold: true;';
+    camWorld.bgColor = AnimatorSkin.BG_BOTTOM;
+  }
+
+  function onThemeChanged():Void
+  {
+    restyle();
+    decor.refreshTheme();
+    decorKey = '';
+    renderDirty = true;
+  }
+
+  /**
+   * Theme: presets and three colors (accent, second accent, background), applied as you pick them.
+   */
+  function openThemeDialog():Void
+  {
+    var before = AnimatorSkin.theme;
+    var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
+    dialog.title = 'Animator Theme';
+    dialog.buttons = DialogButton.CANCEL | 'Done';
+    dialog.destroyOnClose = true;
+    var box = new VBox();
+    box.styleString = 'spacing: 8px;';
+    var intro = new Label();
+    intro.text = 'Pick a preset, or choose any colors below. Changes show right away.';
+    intro.width = 340;
+    intro.addClass('anim-note');
+    box.addComponent(intro);
+
+    var form = new QOLForm(110, 150);
+    function apply(t:AnimTheme)
+    {
+      AnimatorSkin.applyTheme(t);
+      onThemeChanged();
+      form.refresh();
+    }
+    var grid = new VBox();
+    grid.styleString = 'spacing: 4px;';
+    var row:Null<HBox> = null;
+    for (i in 0...AnimatorSkin.PRESETS.length)
+    {
+      var p = AnimatorSkin.PRESETS[i];
+      if (i % 2 == 0)
+      {
+        row = new HBox();
+        row.styleString = 'spacing: 4px;';
+        grid.addComponent(row);
+      }
+      var b = new Button();
+      b.text = p.name;
+      b.width = 168;
+      b.height = 28;
+      b.icon = AnimatorSkin.themeSwatch(p);
+      b.styleString = 'text-align: left;';
+      b.onClick = _ -> apply(p);
+      row.addComponent(b);
+    }
+    box.addComponent(grid);
+
+    form.section('Your colors');
+    form.colorField('Accent', () -> AnimatorSkin.theme.accent, v -> apply({
+      name: 'Custom',
+      accent: v,
+      accent2: AnimatorSkin.theme.accent2,
+      base: AnimatorSkin.theme.base
+    }));
+    form.colorField('Second accent', () -> AnimatorSkin.theme.accent2, v -> apply({
+      name: 'Custom',
+      accent: AnimatorSkin.theme.accent,
+      accent2: v,
+      base: AnimatorSkin.theme.base
+    }));
+    form.colorField('Background', () -> AnimatorSkin.theme.base, v -> apply({
+      name: 'Custom',
+      accent: AnimatorSkin.theme.accent,
+      accent2: AnimatorSkin.theme.accent2,
+      base: v
+    }));
+    form.note('The background color sets the panels\' tint; they always stay dark so drawings stand out.');
+    form.buttons([
+      {
+        text: 'Surprise me!',
+        cb: () -> {
+          var h = Math.random() * 360;
+          apply({
+            name: 'Custom',
+            accent: AnimatorSkin.fromHsl(h, 0.85, 0.62),
+            accent2: AnimatorSkin.fromHsl((h + 40 + Math.random() * 80) % 360, 0.8, 0.62),
+            base: AnimatorSkin.fromHsl((h + 180 + Math.random() * 60) % 360, 0.45, 0.16)
+          });
+        }
+      },
+      {text: 'Reset', cb: () -> apply(AnimatorSkin.PRESETS[0])}
+    ]);
+    box.addComponent(form);
+    dialog.addComponent(box);
+    dialog.onDialogClosed = function(e) {
+      if (e.button == DialogButton.CANCEL)
+      {
+        AnimatorSkin.applyTheme(before);
+        onThemeChanged();
+      }
+    };
+    dialog.showDialog(true);
   }
 
   var layoutReady:Bool = false;
@@ -271,6 +404,8 @@ class AnimatorState extends QOLEditorState
     {
       badge.left = FlxG.width - 128 - 8;
       badge.top = 5;
+      themeButton.left = FlxG.width - 128 - 8 - 86 - 6;
+      themeButton.top = 4;
     }
     timeline.setBounds(0, workBottom + CONTROLS_H, FlxG.width, FlxG.height - (workBottom + CONTROLS_H) - QOLEditorState.STATUSBAR_HEIGHT);
   }
@@ -364,6 +499,8 @@ class AnimatorState extends QOLEditorState
       renderDirty = true;
     });
     addMenuCheck(view, 'Loop Playback', loopPlayback, v -> loopPlayback = v);
+    addMenuSeparator(view);
+    addMenuItem(view, 'Theme...', null, () -> openThemeDialog());
 
     var control = addMenu('Control');
     addMenuItem(control, 'Play / Stop', 'Enter', togglePlay);
@@ -536,11 +673,8 @@ class AnimatorState extends QOLEditorState
   function buildControls():Void
   {
     ctrlBar = new HBox();
-    ctrlBar.styleString = 'spacing: 4px; background: #2A1F52 #201842 vertical; border-top: 1px solid #3D3366; border-bottom: 1px solid #3D3366; '
-      + 'padding-left: 8px; padding-right: 8px; padding-top: 4px;';
     root.addComponent(ctrlBar);
     pathLabel = new Label();
-    pathLabel.styleString = 'color: #FF8FC0; font-bold: true; padding-top: 6px; padding-right: 4px;';
     ctrlBar.addComponent(pathLabel);
     backButton = iconButton('back', 'Scene', 'Stop editing this symbol (Esc)', () -> exitSymbol(true));
     ctrlBar.addComponent(backButton);
@@ -567,8 +701,6 @@ class AnimatorState extends QOLEditorState
     ctrlBar.addComponent(onionButton);
     frameLabel = new Label();
     frameLabel.width = 150;
-    frameLabel.styleString = 'background-color: #15112A; border: 1px solid #3D3366; border-radius: 12px; color: #9FE8FF; padding-top: 5px; '
-      + 'padding-bottom: 5px; text-align: center; font-bold: true;';
     ctrlBar.addComponent(frameLabel);
     ctrlBar.addComponent(gap(10));
     ctrlBar.addComponent(colored(iconButton('layer', 'Layer', 'New vector layer', () -> addLayer('vector'), 16, AnimatorSkin.CYAN), 'cyan'));
@@ -1001,7 +1133,7 @@ class AnimatorState extends QOLEditorState
       g.drawRoundRect(x - grow + 5, y - grow + 9, w + grow * 2, h + grow * 2, grow * 2 + 4, grow * 2 + 4);
       g.endFill();
     }
-    g.lineStyle(5, 0xFF5C9D, playing ? 0.32 : 0.16);
+    g.lineStyle(5, AnimatorSkin.ACCENT & 0xFFFFFF, playing ? 0.32 : 0.16);
     g.drawRect(x - 3.5, y - 3.5, w + 7, h + 7);
     g.lineStyle(1.5, 0xFFFFFF, 0.5);
     g.drawRect(x - 1, y - 1, w + 2, h + 2);

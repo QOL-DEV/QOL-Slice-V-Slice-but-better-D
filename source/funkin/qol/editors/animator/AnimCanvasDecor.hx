@@ -51,7 +51,7 @@ class AnimCanvasDecor extends FlxGroup
     this.camWorld = camWorld;
     this.camUI = camUI;
 
-    gradient = FlxGradient.createGradientFlxSprite(16, 256, [AnimatorSkin.BG_TOP, AnimatorSkin.BG_BOTTOM]);
+    gradient = new FlxSprite();
     gradient.scrollFactor.set();
     gradient.cameras = [camWorld];
     add(gradient);
@@ -63,7 +63,7 @@ class AnimCanvasDecor extends FlxGroup
     add(grid);
 
     tagBg = ui(new FlxSprite());
-    tagText = ui(QOLTheme.text(0, 0, 600, '', 12, QOLTheme.FONT_TITLE, 0xFFEDE6FF));
+    tagText = ui(QOLTheme.text(0, 0, 600, '', 12, QOLTheme.FONT_TITLE, AnimatorSkin.TEXT));
     add(tagBg);
     add(tagText);
 
@@ -83,6 +83,8 @@ class AnimCanvasDecor extends FlxGroup
     add(hintBody);
     setHintAlpha(0);
 
+    refreshTheme();
+
     toastBg = ui(new FlxSprite());
     toastIcon = ui(new FlxSprite());
     toastText = ui(QOLTheme.outlinedText(0, 0, 220, '', 18, FlxColor.WHITE, 2));
@@ -90,6 +92,21 @@ class AnimCanvasDecor extends FlxGroup
     add(toastIcon);
     add(toastText);
     setToastAlpha(0);
+  }
+
+  /**
+   * Recolor everything for the current theme.
+   */
+  public function refreshTheme():Void
+  {
+    var key = 'qol-anim-bg-${StringTools.hex(AnimatorSkin.BG_TOP, 8)}-${StringTools.hex(AnimatorSkin.BG_BOTTOM, 8)}';
+    gradient.loadGraphic(QOLTheme.cached(key, () -> FlxGradient.createGradientBitmapData(16, 256, [AnimatorSkin.BG_TOP, AnimatorSkin.BG_BOTTOM])));
+    tagText.color = AnimatorSkin.TEXT;
+    tagWidth = -1;
+    var t = tagText.text;
+    tagText.text = '';
+    if (t != '') setStageTag(tagBg.x, tagBg.y + 28, t, -9999, -9999, 99999);
+    hintBody.color = AnimatorSkin.TEXT_SOFT;
   }
 
   function ui<T:FlxSprite>(s:T):T
@@ -135,7 +152,9 @@ class AnimCanvasDecor extends FlxGroup
       if (w != tagWidth)
       {
         tagWidth = w;
-        tagBg.loadGraphic(QOLTheme.cached('qol-anim-tag-$w', () -> QOLTheme.drawRound(w, 22, 0xE6150F2C, 11, 0xFF4A3F85, 1.5)));
+        var fill = (AnimatorSkin.FIELD & 0xFFFFFF) | 0xE6000000;
+        tagBg.loadGraphic(QOLTheme.cached('qol-anim-tag-$w-${StringTools.hex(fill, 8)}-${StringTools.hex(AnimatorSkin.BORDER_LIGHT, 8)}',
+          () -> QOLTheme.drawRound(w, 22, fill, 11, AnimatorSkin.BORDER_LIGHT, 1.5)));
       }
     }
     var tx = Math.max(minX, Math.min(maxX - tagWidth, x));
@@ -174,7 +193,7 @@ class AnimCanvasDecor extends FlxGroup
 
   public function showTool(id:String, name:String, key:String, x:Float, y:Float):Void
   {
-    var color = AnimatorSkin.TOOL_COLORS.get(id) ?? AnimatorSkin.PINK;
+    var color = AnimatorSkin.TOOL_COLORS.get(id) ?? AnimatorSkin.ACCENT;
     toastText.text = '$name  ($key)';
     var w = Std.int(toastText.textField.textWidth + 70);
     toastBg.loadGraphic(QOLTheme.cached('qol-anim-toast-$w-${StringTools.hex(color, 8)}',
