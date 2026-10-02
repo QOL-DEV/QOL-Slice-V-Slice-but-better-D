@@ -70,6 +70,17 @@ class AnimTimelineView extends FlxGroup
   var gPixels:FlxGraphic;
   var gGuide:FlxGraphic;
   var gCamera:FlxGraphic;
+  var gSound:FlxGraphic;
+
+  /**
+   * Set when sound timing changes (waveforms are redrawn).
+   */
+  public var waveDirty:Bool = true;
+
+  var layerWaves:FlxGroup = new FlxGroup();
+  var waveSprites:Array<FlxSprite> = [];
+  var waveSigs:Array<String> = [];
+  var nWave:Int = 0;
   var gTag:FlxGraphic;
   var gArrow:FlxGraphic;
   var playheadGlow:FlxSprite;
@@ -102,6 +113,7 @@ class AnimTimelineView extends FlxGroup
     gPixels = AnimatorSkin.iconGraphic('pixels', 14, 0xFFFFFFFF, false);
     gGuide = AnimatorSkin.iconGraphic('guide', 14, 0xFFFFFFFF, false);
     gCamera = AnimatorSkin.iconGraphic('camera', 14, 0xFFFFFFFF, false);
+    gSound = AnimatorSkin.iconGraphic('sound', 14, 0xFFFFFFFF, false);
     gArrow = QOLTheme.cached('anim-tween-arrow', () -> {
       var sh = new Shape();
       sh.graphics.beginFill(0xFFFFFF, 1);
@@ -137,6 +149,7 @@ class AnimTimelineView extends FlxGroup
     add(layerRows);
     add(layerGrid);
     add(layerSpans);
+    add(layerWaves);
     add(layerKeys);
     add(layerText);
     add(title);
@@ -328,7 +341,12 @@ class AnimTimelineView extends FlxGroup
 
   public function redraw():Void
   {
-    nSpan = nKey = nText = nIcon = nGrid = nRow = 0;
+    nSpan = nKey = nText = nIcon = nGrid = nRow = nWave = 0;
+    if (waveDirty)
+    {
+      waveDirty = false;
+      waveSigs = [];
+    }
     applyTheme();
     var sym = ed.sym;
     place(bg, x, y, width, height);
@@ -392,7 +410,7 @@ class AnimTimelineView extends FlxGroup
       // Label column.
       span(x + 4, ry + 3, 4, ROW_H - 7, layer.color);
       if (selected) span(x + 8, ry + 3, 2, ROW_H - 7, layer.color, 0.35);
-      var kindIcon = layer.kind == 'camera' ? gCamera : (layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen));
+      var kindIcon = layer.kind == 'camera' ? gCamera : (layer.kind == 'audio' ? gSound : (layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen)));
       icon(kindIcon, x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
       txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? AnimatorSkin.TEXT_SOFT : AnimatorSkin.TEXT_FAINT));
       icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 60, ry + 5);
@@ -413,7 +431,7 @@ class AnimTimelineView extends FlxGroup
         var kx = frameX(k.start);
         var kw = k.duration * cellW;
         if (kx > x + width || kx + kw < gridX) continue;
-        var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null) || k.camera != null;
+        var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null) || k.camera != null || k.sound != null;
         var color:FlxColor = k.tween != null ? mix(rowColor, AnimatorSkin.ACCENT2, 0.55) : (has ? mix(rowColor, layer.color, 0.32) : mix(rowColor, AnimatorSkin.BORDER, 0.5));
         var sx = Math.max(gridX, kx + 1);
         var ex = Math.min(x + width, kx + kw);
@@ -443,6 +461,8 @@ class AnimTimelineView extends FlxGroup
         }
         if (k.label != null && k.label != '' && kx >= gridX) txt(kx + 12, ry + 4, Math.max(20, kw - 12), k.label, 10, 0xFFFFD84A);
       }
+
+      if (layer.kind == 'audio') drawWave(layer, ry);
 
       // Hover cell.
       if (hoverRow == li && hoverFrame >= 0) span(frameX(hoverFrame), ry, cellW, ROW_H - 1, 0xFFFFFFFF, 0.08);
@@ -481,12 +501,62 @@ class AnimTimelineView extends FlxGroup
       playheadText.setPosition(Math.round(cx - 17), y + 4);
     }
 
+    hide(waveSprites, nWave);
     hide(rowBgs, nRow);
     hide(gridLines, nGrid);
     hide(spans, nSpan);
     hide(keys, nKey);
     hide(texts, nText);
     hide(icons, nIcon);
+  }
+
+  /**
+   * A sound layer's waveform (cached; redrawn when scrolled, zoomed or edited).
+   */
+  function drawWave(layer:AnimLayer, ry:Float):Void
+  {
+    var idx = nWave++;
+    var spr = pooled(waveSprites, idx, layerWaves, () -> new FlxSprite());
+    var gw = Std.int(Math.max(1, width - LABEL_W)), gh = ROW_H - 7;
+    var fps = ed.doc.project.fps;
+    var sig = '$scrollFrame|$cellW|$gw|$fps|${layer.color}|' + [for (k in layer.frames) '${k.start},${k.duration},${k.sound},${k.soundStart}'].join(';');
+    if (waveSigs[idx] != sig)
+    {
+      waveSigs[idx] = sig;
+      var bmp = new BitmapData(gw, gh, true, 0);
+      var col:Int = mix(layer.color, 0xFFFFFFFF, 0.45);
+      var rect = new openfl.geom.Rectangle();
+      for (k in layer.frames)
+      {
+        var snd = ed.doc.getSound(k.sound);
+        if (snd == null) continue;
+        var x0 = Std.int(Math.max(0, (k.start - scrollFrame) * cellW + 1));
+        var x1 = Std.int(Math.min(gw, (k.start + k.duration - scrollFrame) * cellW - 1));
+        for (px in x0...x1)
+        {
+          var f0 = scrollFrame + px / cellW;
+          var t0 = (k.soundStart ?? 0) + (f0 - k.start) / fps;
+          if (t0 >= snd.length) break;
+          var amp = snd.peakBetween(t0, t0 + 1 / (cellW * fps));
+          var hh = Math.max(1, Math.round(amp * gh));
+          rect.setTo(px, Math.round((gh - hh) / 2), 1, hh);
+          bmp.fillRect(rect, col);
+        }
+      }
+      var old = spr.graphic;
+      spr.loadGraphic(FlxGraphic.fromBitmapData(bmp, false, null, false));
+      if (old != null && old != spr.graphic && old.key == null) old.destroy();
+    }
+    spr.setPosition(gridX, ry + 3);
+    // The sound's name at each sound keyframe.
+    for (k in layer.frames)
+    {
+      var snd = ed.doc.getSound(k.sound);
+      if (snd == null) continue;
+      var kx = frameX(k.start);
+      if (kx + 20 < gridX || kx > x + width) continue;
+      txt(Math.max(gridX + 2, kx + 12), ry + 4, Math.max(30, k.duration * cellW - 14), snd.name, 10, 0xFFFFFFFF);
+    }
   }
 
   static function hide<T:FlxSprite>(pool:Array<T>, from:Int):Void

@@ -759,6 +759,10 @@ class AnimatorSkin
         poly([16.5, 10.6, 21.8, 7.4, 21.8, 17.6, 16.5, 14.4]);
         circle(6.5, 4.6, 2.6);
         circle(12, 4.6, 2.6);
+      case 'sound':
+        poly([3, 9, 7.5, 9, 13, 4, 13, 20, 7.5, 15, 3, 15]);
+        arc(13, 12, 4.5, -50, 50, 2);
+        arc(13, 12, 8, -55, 55, 2);
       case 'palette':
         g.beginFill(c, a);
         g.moveTo(12 * s, 2.5 * s);

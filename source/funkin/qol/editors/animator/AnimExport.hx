@@ -203,6 +203,136 @@ class AnimExport
   }
 
   //
+  // Video, GIF, sound
+  //
+
+  /**
+   * Every sound on the timeline's sound layers, mixed (16-bit stereo 44.1 kHz), or null if there are none.
+   */
+  public static function soundMix(doc:AnimDoc, sym:AnimSymbol):Null<haxe.io.Bytes>
+  {
+    var fps = doc.project.fps;
+    var parts:Array<{sound:AnimSound, at:Float, from:Float, length:Float, volume:Float}> = [];
+    for (l in sym.layers)
+    {
+      if (l.kind != 'audio' || !l.visible) continue;
+      for (k in l.frames)
+      {
+        var snd = doc.getSound(k.sound);
+        if (snd == null) continue;
+        parts.push({
+          sound: snd,
+          at: k.start / fps,
+          from: k.soundStart ?? 0,
+          length: k.duration / fps,
+          volume: l.volume ?? 1
+        });
+      }
+    }
+    if (parts.length == 0) return null;
+    return AnimSound.mix(parts, AnimData.symbolLength(sym) / fps);
+  }
+
+  /**
+   * One frame of a timeline, flattened over the canvas color (or `bg` if the canvas is transparent).
+   */
+  public static function flatFrame(doc:AnimDoc, sym:AnimSymbol, frame:Int, w:Int, h:Int, transparentOk:Bool, ?bg:Int = 0xFFFFFFFF):BitmapData
+  {
+    var stageBg = (doc.project.bg >>> 24) == 0 ? (transparentOk ? 0 : bg) : (doc.project.bg | 0xFF000000);
+    var bmp = new BitmapData(w, h, true, stageBg);
+    var renderer = new AnimRender(doc);
+    var spr = renderer.render(sym, frame, {forExport: true});
+    var m = new Matrix();
+    if (sym != doc.main) m.translate(doc.project.width / 2, doc.project.height / 2);
+    m.scale(w / doc.project.width, h / doc.project.height);
+    bmp.draw(spr, m, null, null, null, true);
+    return bmp;
+  }
+
+  static function evenSize(doc:AnimDoc, scale:Float):{w:Int, h:Int}
+  {
+    // Video players like even sizes.
+    var w = Std.int(Math.max(2, Math.round(doc.project.width * scale / 2) * 2));
+    var h = Std.int(Math.max(2, Math.round(doc.project.height * scale / 2) * 2));
+    return {w: w, h: h};
+  }
+
+  public static function videoDialog(ed:AnimatorState):Void
+  {
+    var path = 'export/' + AnimIO.fileId(ed.doc.project.name) + '.avi';
+    var scale = 1.0;
+    var quality = 90;
+    var withSound = true;
+    formDialog('Export Video (AVI)', 'Export', form -> {
+      form.textField('Save as (in your mod)', () -> path, v -> path = v);
+      form.number('Scale', () -> scale, v -> scale = v, 0.1, 4, 0.1, 2);
+      form.number('Quality', () -> quality, v -> quality = Std.int(v), 10, 100, 5, 0);
+      form.check('Include the sound layers', () -> withSound, v -> withSound = v);
+      form.note('Motion-JPEG pictures with the sound mix: plays in VLC, Windows Media Player and video editors. '
+        + 'Transparent canvases get a white background.');
+    }, () -> {
+      if (!StringTools.endsWith(path.toLowerCase(), '.avi')) path += '.avi';
+      var size = evenSize(ed.doc, scale);
+      var len = AnimData.symbolLength(ed.sym);
+      var jpegs:Array<haxe.io.Bytes> = [];
+      for (f in 0...len)
+      {
+        var bmp = flatFrame(ed.doc, ed.sym, f, size.w, size.h, false);
+        var ba:openfl.utils.ByteArray = bmp.encode(bmp.rect, new openfl.display.JPEGEncoderOptions(quality));
+        jpegs.push(ba);
+        bmp.dispose();
+      }
+      var pcm = withSound ? soundMix(ed.doc, ed.sym) : null;
+      var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeAvi(jpegs, size.w, size.h, ed.doc.project.fps, pcm));
+      ed.notify('Exported', '$saved ($len frames${pcm != null ? ', with sound' : ''})');
+    });
+  }
+
+  public static function gifDialog(ed:AnimatorState):Void
+  {
+    var path = 'export/' + AnimIO.fileId(ed.doc.project.name) + '.gif';
+    var scale = 0.5;
+    formDialog('Export Animated GIF', 'Export', form -> {
+      form.textField('Save as (in your mod)', () -> path, v -> path = v);
+      form.number('Scale', () -> scale, v -> scale = v, 0.05, 2, 0.05, 2);
+      form.note('Loops forever. GIFs have up to 256 colors and on/off transparency; a transparent canvas stays see-through.');
+    }, () -> {
+      if (!StringTools.endsWith(path.toLowerCase(), '.gif')) path += '.gif';
+      var w = Std.int(Math.max(1, Math.round(ed.doc.project.width * scale)));
+      var h = Std.int(Math.max(1, Math.round(ed.doc.project.height * scale)));
+      var len = AnimData.symbolLength(ed.sym);
+      var frames:Array<haxe.io.Bytes> = [];
+      for (f in 0...len)
+      {
+        var bmp = flatFrame(ed.doc, ed.sym, f, w, h, true);
+        frames.push(AnimIO.argbBytes(bmp));
+        bmp.dispose();
+      }
+      var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeGif(frames, w, h, ed.doc.project.fps));
+      ed.notify('Exported', '$saved ($len frames, ${w}x$h)');
+    });
+  }
+
+  public static function soundDialog(ed:AnimatorState):Void
+  {
+    var pcm = soundMix(ed.doc, ed.sym);
+    if (pcm == null)
+    {
+      ed.alert('No sounds', 'This timeline has no sound layers yet (File > Import > Audio).');
+      return;
+    }
+    var path = 'export/' + AnimIO.fileId(ed.doc.project.name) + '.wav';
+    formDialog('Export Sound Mix', 'Export', form -> {
+      form.textField('Save as (in your mod)', () -> path, v -> path = v);
+      form.note('Every sound layer mixed into one WAV (44.1 kHz stereo), as long as the timeline.');
+    }, () -> {
+      if (!StringTools.endsWith(path.toLowerCase(), '.wav')) path += '.wav';
+      var saved = ModWorkspace.saveBytes(path, AnimSound.writeWav(pcm, 44100, 2));
+      ed.notify('Exported', saved);
+    });
+  }
+
+  //
   // Gathering frames
   //
 

@@ -13,6 +13,7 @@ class AnimDoc
 {
   public var project:AnimProject;
   public var bitmaps:Map<String, BitmapData> = new Map<String, BitmapData>();
+  public var sounds:Map<String, AnimSound> = new Map<String, AnimSound>();
 
   /**
    * Called after any change (with `structural` = layers/frames changed, not just element properties).
@@ -138,6 +139,29 @@ class AnimDoc
     return id;
   }
 
+  //
+  // Sounds
+  //
+
+  public function addSound(name:String, rate:Int, channels:Int, pcm:haxe.io.Bytes):AnimSound
+  {
+    var id = AnimData.makeId('snd');
+    var snd = new AnimSound(id, name, rate, channels, pcm);
+    sounds.set(id, snd);
+    if (project.sounds == null) project.sounds = [];
+    project.sounds.push({
+      id: id,
+      name: name,
+      rate: rate,
+      channels: snd.channels,
+      length: snd.length
+    });
+    return snd;
+  }
+
+  public function getSound(id:Null<String>):Null<AnimSound>
+    return id == null ? null : sounds.get(id);
+
   /**
    * Swap a bitmap's pixels (e.g. a canvas that grew), keeping its id.
    */
@@ -201,6 +225,29 @@ class AnimDoc
       }
     }
     project.bitmaps = [for (b in project.bitmaps) if (bitmaps.exists(b.id)) b];
+
+    // Sounds nothing uses any more.
+    var usedSounds = new Map<String, Bool>();
+    var sre = ~/"(snd-[0-9a-z]+)"/g;
+    for (t in texts)
+    {
+      var pos = 0;
+      while (sre.matchSub(t, pos))
+      {
+        usedSounds.set(sre.matched(1), true);
+        var mp = sre.matchedPos();
+        pos = mp.pos + mp.len;
+      }
+    }
+    for (id in [for (k in sounds.keys()) k])
+    {
+      if (!usedSounds.exists(id))
+      {
+        sounds.get(id)?.dispose();
+        sounds.remove(id);
+      }
+    }
+    if (project.sounds != null) project.sounds = [for (s in project.sounds) if (sounds.exists(s.id)) s];
   }
 
   /**
@@ -211,6 +258,20 @@ class AnimDoc
     var known = new Map<String, Bool>();
     for (b in project.bitmaps)
       known.set(b.id, true);
+    var knownSounds = new Map<String, Bool>();
+    if (project.sounds == null) project.sounds = [];
+    for (s in project.sounds)
+      knownSounds.set(s.id, true);
+    for (id => snd in sounds)
+    {
+      if (!knownSounds.exists(id)) project.sounds.push({
+        id: id,
+        name: snd.name,
+        rate: snd.rate,
+        channels: snd.channels,
+        length: snd.length
+      });
+    }
     for (id => bmp in bitmaps)
     {
       if (!known.exists(id) && bmp != null) project.bitmaps.push({

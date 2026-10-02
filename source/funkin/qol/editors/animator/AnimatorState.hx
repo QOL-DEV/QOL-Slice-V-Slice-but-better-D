@@ -163,6 +163,7 @@ class AnimatorState extends QOLEditorState
 
   // UI.
   public var timeline:AnimTimelineView;
+  public var audio:AnimAudioPlayer;
 
   var toolsPanel:QOLDockPanel;
   var inspector:QOLDockPanel;
@@ -259,6 +260,7 @@ class AnimatorState extends QOLEditorState
     doc = loaded ?? new AnimDoc(AnimData.newProject('My Animation'));
     doc.onChange = onDocChanged;
     renderer = new AnimRender(doc);
+    audio = new AnimAudioPlayer(this);
 
     decor = new AnimCanvasDecor(camWorld, camUI);
     add(decor);
@@ -474,7 +476,8 @@ class AnimatorState extends QOLEditorState
     addMenuItem(imp, 'Sprite Sheet Grid...', null, () -> AnimImport.importGrid(this));
     addMenuItem(imp, 'Adobe Animate File (.fla / .xfl)...', null, () -> AnimImport.importFla(this));
     addMenuItem(imp, 'Photoshop / ToonSquid / ibisPaint (.psd)...', null, () -> AnimImport.importPsd(this));
-    addMenuItem(imp, 'Video (MP4 / MOV)...', null, () -> AnimImport.importVideo(this));
+    addMenuItem(imp, 'Video or GIF (MP4, MOV, WebM, MKV, AVI, GIF...)...', null, () -> AnimImport.importVideo(this));
+    addMenuItem(imp, 'Audio (MP3, OGG, WAV, FLAC, M4A, Opus...)...', null, () -> AnimImport.importAudio(this));
     var exp = addSubMenu(file, 'Export');
     addMenuItem(exp, 'Sprite Atlas for the Game (Sparrow PNG + XML)...', null, () -> AnimExport.sparrowDialog(this));
     addMenuItem(exp, 'Animate Texture Atlas (Animation.json + spritemap)...', null, () -> AnimExport.animateDialog(this));
@@ -482,6 +485,10 @@ class AnimatorState extends QOLEditorState
     addMenuItem(exp, 'Adobe Animate File (.fla)...', null, () -> AnimExport.flaDialog(this));
     addMenuItem(exp, 'Animated PSD (for ToonSquid)...', null, () -> AnimExport.psdDialog(this, true));
     addMenuItem(exp, 'Layered PSD per Frame (for ibisPaint)...', null, () -> AnimExport.psdDialog(this, false));
+    addMenuSeparator(exp);
+    addMenuItem(exp, 'Video (AVI with sound)...', null, () -> AnimExport.videoDialog(this));
+    addMenuItem(exp, 'Animated GIF...', null, () -> AnimExport.gifDialog(this));
+    addMenuItem(exp, 'Sound Mix (WAV)...', null, () -> AnimExport.soundDialog(this));
 
     var edit = addMenu('Edit');
     addMenuItem(edit, 'Undo', 'Ctrl+Z', undo);
@@ -527,6 +534,7 @@ class AnimatorState extends QOLEditorState
     addMenuItem(insert, 'New Layer', null, () -> addLayer('vector'));
     addMenuItem(insert, 'New Bitmap Layer', null, () -> addLayer('bitmap'));
     addMenuItem(insert, 'Add Camera', null, () -> addCamera());
+    addMenuItem(insert, 'Add Sound...', null, () -> AnimImport.importAudio(this));
     addMenuItem(insert, 'Delete Layer', null, deleteLayer);
     addMenuItem(insert, 'Duplicate Layer', null, duplicateLayer);
 
@@ -757,6 +765,7 @@ class AnimatorState extends QOLEditorState
     ctrlBar.addComponent(colored(iconButton('layer', 'Layer', 'New vector layer', () -> addLayer('vector'), 16, AnimatorSkin.CYAN), 'cyan'));
     ctrlBar.addComponent(colored(iconButton('bitmap', 'Paint Layer', 'New bitmap layer, for painting pixels', () -> addLayer('bitmap'), 16, AnimatorSkin.GREEN), 'green'));
     ctrlBar.addComponent(colored(iconButton('camera', null, 'Camera: add an animatable camera (pan, zoom, turn)', () -> addCamera(), 16, AnimatorSkin.YELLOW), 'yellow'));
+    ctrlBar.addComponent(colored(iconButton('sound', null, 'Add a sound (MP3, OGG, WAV, FLAC, M4A, video soundtracks...)', () -> AnimImport.importAudio(this), 16, AnimatorSkin.GREEN), 'green'));
     ctrlBar.addComponent(colored(iconButton('trash', null, 'Delete the selected layer', deleteLayer, 16, 0xFFFF6B6B), 'red'));
     ctrlBar.addComponent(gap(10));
     ctrlBar.addComponent(colored(iconButton('frame', 'Frame', 'Insert frame (F5)', () -> insertFrames(1), 16, 0xFFEDE6FF), 'purple'));
@@ -899,6 +908,7 @@ class AnimatorState extends QOLEditorState
         doc = new AnimDoc(AnimData.newProject(name));
         doc.onChange = onDocChanged;
         renderer = new AnimRender(doc);
+        audio.stopAll();
         editPath = [];
         frame = 0;
         curLayer = 0;
@@ -933,6 +943,7 @@ class AnimatorState extends QOLEditorState
         doc = loaded;
         doc.onChange = onDocChanged;
         renderer = new AnimRender(doc);
+        audio.stopAll();
         editPath = [];
         frame = 0;
         curLayer = 0;
@@ -956,6 +967,7 @@ class AnimatorState extends QOLEditorState
     doc = d;
     doc.onChange = onDocChanged;
     renderer = new AnimRender(doc);
+    audio.stopAll();
     editPath = [];
     frame = 0;
     curLayer = 0;
@@ -1142,6 +1154,8 @@ class AnimatorState extends QOLEditorState
       }
       timeline.follow(frame);
     }
+
+    audio.update(playing, frame);
 
     // Property edits made in one mouse press (or one typed value) undo together.
     if (!FlxG.mouse.pressed && !isTyping) editStarted = false;
@@ -1780,6 +1794,136 @@ class AnimatorState extends QOLEditorState
     }
     liveShape.graphics.clear();
     drag = '';
+  }
+
+  //
+  // Sound
+  //
+
+  /**
+   * A new sound layer playing `snd` from frame `start` (as long as the sound).
+   */
+  public function addSoundLayer(snd:AnimSound, start:Int):Void
+  {
+    doc.checkpoint();
+    var layer = AnimData.newLayer(snd.name, 'audio', 6);
+    layer.color = 0xFF6BE38E;
+    layer.frames = [];
+    if (start > 0) layer.frames.push({start: 0, duration: start, elements: []});
+    layer.frames.push({
+      start: start,
+      duration: Std.int(Math.max(1, Math.ceil(snd.length * doc.project.fps))),
+      elements: [],
+      sound: snd.id,
+      soundStart: 0
+    });
+    sym.layers.push(layer);
+    curLayer = sym.layers.length - 1;
+    selection = [];
+    doc.changed();
+    refreshLibrary();
+  }
+
+  /**
+   * Add a decoded sound to the document and put it on a new sound layer at the playhead.
+   */
+  public function importSound(name:String, a:AnimMedia.DecodedAudio, ?start:Int):Void
+  {
+    var snd = doc.addSound(name, a.rate, a.channels, a.pcm);
+    addSoundLayer(snd, start ?? frame);
+    notify('Sound added', '$name (${Math.round(snd.length * 10) / 10}s) is on a new sound layer. Press Play to hear it with the animation.');
+  }
+
+  function buildAudioProps(form:QOLForm, layer:AnimLayer):Void
+  {
+    var key = AnimData.keyAt(layer, frame);
+    var snd = key != null ? doc.getSound(key.sound) : null;
+    form.section('Sound layer');
+    if (snd != null)
+    {
+      form.note('${snd.name}: ${Math.round(snd.length * 100) / 100}s, ${snd.rate} Hz, ${snd.channels == 1 ? 'mono' : 'stereo'}.');
+      form.number('Starts at (s)', () -> key.soundStart ?? 0, v -> {
+        if (!editStarted)
+        {
+          doc.checkpoint();
+          editStarted = true;
+        }
+        key.soundStart = Math.max(0, v);
+        dirty = true;
+        timeline.waveDirty = true;
+      }, 0, 36000, 0.05, 2);
+      form.buttons([
+        {
+          text: 'Fit keyframe to the sound',
+          cb: () -> {
+            doc.checkpoint();
+            var frames = Std.int(Math.max(1, Math.ceil((snd.length - (key.soundStart ?? 0)) * doc.project.fps)));
+            var idx = layer.frames.indexOf(key);
+            var next = idx + 1 < layer.frames.length ? layer.frames[idx + 1] : null;
+            if (next != null && key.start + frames > next.start) frames = next.start - key.start;
+            key.duration = frames;
+            doc.changed();
+          }
+        },
+        {
+          text: 'Remove sound',
+          cb: () -> {
+            doc.checkpoint();
+            key.sound = null;
+            key.soundStart = null;
+            doc.changed();
+          }
+        }
+      ]);
+    }
+    else
+      form.note('No sound at this frame. File > Import > Audio puts a sound on a new layer; the Library lists the sounds you have.');
+    form.slider('Volume', () -> layer.volume ?? 1, v -> layer.volume = v, 0, 1, 0.05);
+    form.check('Mute', () -> !layer.visible, v -> layer.visible = !v);
+    form.check('Hear sounds while scrubbing', () -> audio.scrub, v -> {
+      audio.scrub = v;
+      QOLConfig.setPref('animator.scrubSound', v);
+    });
+    form.note('Sounds play with the animation and while you drag the playhead. File > Export > Sound Mix makes one WAV of every sound layer.');
+  }
+
+  /**
+   * A progress window (with Cancel) for slow imports.
+   */
+  public function showProgress(title:String, text:String, onCancel:Void->Void):{update:Float->Void, close:Void->Void}
+  {
+    var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
+    dialog.title = title;
+    dialog.buttons = DialogButton.CANCEL;
+    dialog.destroyOnClose = true;
+    var box = new VBox();
+    box.styleString = 'spacing: 8px;';
+    var label = new Label();
+    label.text = text;
+    label.width = 340;
+    box.addComponent(label);
+    var bar = new haxe.ui.components.HorizontalProgress();
+    bar.width = 340;
+    bar.min = 0;
+    bar.max = 100;
+    bar.pos = 0;
+    box.addComponent(bar);
+    dialog.addComponent(box);
+    var closed = false;
+    dialog.onDialogClosed = function(_) {
+      if (closed) return;
+      closed = true;
+      onCancel();
+    };
+    dialog.showDialog(true);
+    return {
+      update: p -> if (!closed) bar.pos = Math.round(Math.max(0, Math.min(1, p)) * 100),
+      close: () -> {
+        if (closed) return;
+        closed = true;
+        dialog.hideDialog(DialogButton.CANCEL);
+      }
+    };
   }
 
   //
@@ -3057,6 +3201,11 @@ class AnimatorState extends QOLEditorState
       ds.add({text: 'Image    ${b.name}   ${b.width}x${b.height}'});
       libIds.push('bmp:' + b.id);
     }
+    for (snd in doc.sounds)
+    {
+      ds.add({text: 'Sound    ${snd.name}   ${Math.round(snd.length * 10) / 10}s'});
+      libIds.push('snd:' + snd.id);
+    }
     libList.dataSource = ds;
   }
 
@@ -3076,6 +3225,12 @@ class AnimatorState extends QOLEditorState
   {
     var id = libSelected();
     if (id == null) return;
+    if (StringTools.startsWith(id, 'snd:'))
+    {
+      var snd = doc.getSound(id.substr(4));
+      if (snd != null) addSoundLayer(snd, frame);
+      return;
+    }
     var layer = currentLayer();
     if (layer == null || layer.kind == 'bitmap')
     {
@@ -3283,7 +3438,11 @@ class AnimatorState extends QOLEditorState
     frame = f;
     clampState();
     renderDirty = true;
-    if (!playing) refreshProps();
+    if (!playing)
+    {
+      refreshProps();
+      audio.scrubAt(frame);
+    }
     timeline.follow(frame);
   }
 
@@ -3638,6 +3797,10 @@ class AnimatorState extends QOLEditorState
     {
       buildCameraProps(form);
     }
+    else if (layer != null && layer.kind == 'audio')
+    {
+      buildAudioProps(form, layer);
+    }
     else if (selection.length > 0 && tool == 'select')
     {
       buildElementProps(form);
@@ -3651,6 +3814,9 @@ class AnimatorState extends QOLEditorState
     {
       form.section('Layer: ${layer.name}');
       form.textField('Name', () -> layer.name, v -> layer.name = v);
+    }
+    if (layer != null && layer.kind != 'audio' && layer.kind != 'camera')
+    {
       form.slider('Opacity', () -> layer.alpha, v -> {
         layer.alpha = v;
         renderDirty = true;
@@ -3665,7 +3831,7 @@ class AnimatorState extends QOLEditorState
       });
     }
 
-    if (key != null && layer != null && layer.kind != 'bitmap')
+    if (key != null && layer != null && layer.kind != 'bitmap' && layer.kind != 'audio')
     {
       form.section('Keyframe at frame ${key.start + 1}');
       form.textField('Label', () -> key.label ?? '', v -> key.label = v == '' ? null : v);
@@ -4017,6 +4183,7 @@ class AnimatorState extends QOLEditorState
   override public function destroy():Void
   {
     QOLSlice.editorOwnsFunctionKeys = false;
+    audio?.stopAll();
     if (canvasRoot != null && canvasRoot.parent != null) canvasRoot.parent.removeChild(canvasRoot);
     super.destroy();
   }

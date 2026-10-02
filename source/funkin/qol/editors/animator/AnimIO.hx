@@ -27,6 +27,9 @@ class AnimIO
   public static function bitmapPath(id:String, bitmapId:String):String
     return '$FOLDER/$id/$bitmapId.png';
 
+  public static function soundPath(id:String, soundId:String):String
+    return '$FOLDER/$id/$soundId.wav';
+
   /**
    * Saved animations in the active mod.
    */
@@ -51,6 +54,11 @@ class AnimIO
       if (ModWorkspace.exists(path)) continue; // Bitmaps never change once saved (painting makes a new one).
       ModWorkspace.saveBytes(path, encodePNG(bmp));
     }
+    for (snd in doc.sounds)
+    {
+      var path = soundPath(id, snd.id);
+      if (!ModWorkspace.exists(path)) ModWorkspace.saveBytes(path, snd.toWav());
+    }
     return ModWorkspace.saveText(jsonPath(id), haxe.Json.stringify(doc.project, null, '  '));
   }
 
@@ -66,6 +74,15 @@ class AnimIO
       var bmp = bytes != null ? decodePNG(bytes) : null;
       if (bmp == null) bmp = new BitmapData(Std.int(Math.max(1, info.width)), Std.int(Math.max(1, info.height)), true, 0);
       doc.bitmaps.set(info.id, bmp);
+    }
+    if (project.sounds != null)
+    {
+      for (info in project.sounds)
+      {
+        var bytes = ModWorkspace.getBytes(soundPath(id, info.id));
+        var wav = bytes != null ? AnimSound.readWav(bytes) : null;
+        if (wav != null) doc.sounds.set(info.id, new AnimSound(info.id, info.name, wav.rate, wav.channels, wav.pcm));
+      }
     }
     return doc;
   }
@@ -103,6 +120,7 @@ class AnimIO
   public static function fromBGRA(bgra:Bytes, w:Int, h:Int):BitmapData
   {
     var argb = new ByteArray(w * h * 4);
+    argb.endian = openfl.utils.Endian.BIG_ENDIAN; // setPixels reads 32-bit ARGB in this order
     for (i in 0...w * h)
     {
       var p = i * 4;

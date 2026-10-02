@@ -22,6 +22,24 @@ typedef AnimProject =
 
   var symbols:Array<AnimSymbol>;
   var bitmaps:Array<AnimBitmapInfo>;
+
+  /**
+   * Sounds used by audio layers (saved as WAV files next to the animation).
+   */
+  var ?sounds:Array<AnimSoundInfo>;
+}
+
+typedef AnimSoundInfo =
+{
+  var id:String;
+  var name:String;
+  var rate:Int;
+  var channels:Int;
+
+  /**
+   * Seconds.
+   */
+  var length:Float;
 }
 
 typedef AnimSymbol =
@@ -76,6 +94,11 @@ typedef AnimLayer =
   var color:Int;
   var alpha:Float;
   var ?blend:String;
+
+  /**
+   * Audio layers: volume (0..1, default 1).
+   */
+  var ?volume:Float;
   var frames:Array<AnimKeyframe>;
 }
 
@@ -103,6 +126,16 @@ typedef AnimKeyframe =
   var ?tween:AnimTween;
 
   var ?label:String;
+
+  /**
+   * Audio layers: the sound that starts playing at this keyframe.
+   */
+  var ?sound:String;
+
+  /**
+   * Audio layers: seconds into the sound where this keyframe starts.
+   */
+  var ?soundStart:Float;
 
   /**
    * Camera layers: where the camera looks at this keyframe.

@@ -704,9 +704,84 @@ class AnimImport
     });
   }
 
+  public static function importAudio(ed:AnimatorState):Void
+  {
+    QOLFilePicker.open('Sound (MP3, OGG, WAV, FLAC, M4A, Opus, WMA, AIFF... or a video\'s soundtrack)', AnimMedia.AUDIO_EXTS.concat(AnimMedia.VIDEO_EXTS), false, files -> {
+      var f = files[0];
+      var name = haxe.io.Path.withoutExtension(f.name);
+      var cancel:Void->Void = () -> {};
+      var progress = ed.showProgress('Loading ${f.name}', 'Decoding the sound...', () -> cancel());
+      cancel = AnimMedia.decodeAudio(f, a -> {
+        progress.close();
+        ed.importSound(name, a);
+      }, err -> {
+        progress.close();
+        if (err != 'Cancelled') ed.alert('Could not load the sound', err);
+      }, p -> progress.update(p));
+    });
+  }
+
   public static function importVideo(ed:AnimatorState):Void
   {
-    AnimVideo.importVideo(ed);
+    QOLFilePicker.open('Video or GIF (MP4, MOV, WebM, MKV, AVI, WMV, FLV, MPEG, 3GP, OGV, GIF...)', AnimMedia.VIDEO_EXTS, false, files -> {
+      var f = files[0];
+      var isGif = QOLFilePicker.ext(f.name) == 'gif';
+      var doc = ed.doc;
+      var fps = doc.project.fps;
+      var size = 'stage';
+      var seconds = isGif ? 60.0 : 10.0;
+      var withAudio = !isGif;
+      AnimExport.formDialog(isGif ? 'Import GIF' : 'Import Video', 'Import', form -> {
+        form.note(f.name);
+        form.number('Frame rate', () -> fps, v -> fps = Math.max(1, Math.min(60, v)), 1, 60, 1, 0);
+        form.dropdown('Size', () -> ['stage', 'half', 'full'], () -> size, v -> size = v,
+          () -> ['Fit the stage (${doc.project.width}x${doc.project.height})', 'Half the stage', 'Original size (up to 1920)']);
+        form.number('Seconds to import', () -> seconds, v -> seconds = Math.max(0.1, v), 0.1, 3600, 1, 1);
+        if (!isGif) form.check('Also import its sound', () -> withAudio, v -> withAudio = v);
+        form.note('The frames go on a new paint layer at the playhead${isGif ? '' : ', the sound on a sound layer'}. '
+          + (isGif ? '' : 'Videos are played through once to read them, so this takes about as long as the clip. ')
+          + 'Long or big videos use lots of memory.');
+      }, () -> {
+        var maxW = doc.project.width, maxH = doc.project.height;
+        switch (size)
+        {
+          case 'half':
+            maxW = Std.int(maxW / 2);
+            maxH = Std.int(maxH / 2);
+          case 'full':
+            maxW = 1920;
+            maxH = 1920;
+          default:
+        }
+        var opts:AnimMedia.VideoOptions = {
+          fps: fps,
+          maxWidth: Std.int(Math.max(16, maxW)),
+          maxHeight: Std.int(Math.max(16, maxH)),
+          maxSeconds: seconds,
+          withAudio: withAudio
+        };
+        var cancel:Void->Void = () -> {};
+        var progress = ed.showProgress('Importing ${f.name}', isGif ? 'Reading the GIF...' : 'Reading the video (it plays through once, silently)...',
+          () -> cancel());
+        var start = ed.frame;
+        cancel = AnimMedia.decodeVideo(f, opts, v -> {
+          progress.close();
+          if (v.frames.length == 0 && v.audio == null)
+          {
+            ed.alert('Nothing imported', 'No frames could be read from ${f.name}.');
+            return;
+          }
+          var name = haxe.io.Path.withoutExtension(f.name);
+          var empty = doc.project.symbols.length == 1 && AnimData.symbolLength(doc.main) <= 1;
+          if (empty) doc.project.fps = fps;
+          if (v.frames.length > 0) addBitmapFrames(ed, name, v.frames);
+          if (v.audio != null && v.audio.pcm.length > 0) ed.importSound(name, v.audio, start);
+        }, err -> {
+          progress.close();
+          if (err != 'Cancelled') ed.alert('Could not import', err);
+        }, p -> progress.update(p));
+      });
+    });
   }
 }
 #end
