@@ -82,14 +82,12 @@ class ModpackManagerState extends QOLEditorState
     var top = QOLEditorState.MENUBAR_HEIGHT + 8;
     var height = FlxG.height - QOLEditorState.MENUBAR_HEIGHT - QOLEditorState.STATUSBAR_HEIGHT - 16;
 
-    // Left: mod list & load order.
+    // Left: mod list & load order (a movable panel).
+    var leftPanel = addDockPanel('mods', 'Your Mods', LIST_W, 'left');
     var left = new VBox();
-    left.left = 8;
-    left.top = top;
-    left.width = LIST_W;
-    left.height = height;
-    left.styleString = 'background-color: #2B2340; border: 1px solid #5A4F80; border-radius: 8px; padding: 10px; spacing: 6px;';
-    root.addComponent(left);
+    left.width = LIST_W - 28;
+    left.styleString = 'spacing: 6px;';
+    leftPanel.content.addComponent(left);
 
     var listTitle = new Label();
     listTitle.text = 'Your mods (load order)';
@@ -103,7 +101,7 @@ class ModpackManagerState extends QOLEditorState
 
     modList = new ListView();
     modList.width = LIST_W - 22;
-    modList.height = height - 190;
+    modList.height = height - 220;
     modList.onChange = function(_) {
       var item = modList.selectedItem;
       if (item != null && item.folder != current) loadMod(item.folder);
@@ -131,11 +129,12 @@ class ModpackManagerState extends QOLEditorState
     newButton.onClick = _ -> newMod();
     left.addComponent(newButton);
 
-    // Center: metadata form.
-    var centerScroll = new funkin.qol.ui.QOLScrollView();
+    // Center: metadata form (fills the space between the panels).
+    centerScroll = new funkin.qol.ui.QOLScrollView();
     centerScroll.left = LIST_W + 16;
     centerScroll.top = top;
     centerScroll.width = FlxG.width - LIST_W - ICON_W - 32;
+    naturalCenterWidth = centerScroll.width;
     centerScroll.height = height;
     centerScroll.horizontalScrollPolicy = 'never';
     centerScroll.styleString = 'background-color: #2B2340; border: 1px solid #5A4F80; border-radius: 8px; padding: 12px;';
@@ -194,14 +193,12 @@ class ModpackManagerState extends QOLEditorState
     for (a in [descField, depsField, optDepsField])
       a.onChange = _ -> markDirty();
 
-    // Right: icon & folders.
+    // Right: icon & folders (a movable panel).
+    var rightPanel = addDockPanel('icon', 'Icon & Folders', ICON_W, 'right');
     var right = new VBox();
-    right.left = FlxG.width - ICON_W - 8;
-    right.top = top;
-    right.width = ICON_W;
-    right.height = height;
-    right.styleString = 'background-color: #2B2340; border: 1px solid #5A4F80; border-radius: 8px; padding: 10px; spacing: 6px;';
-    root.addComponent(right);
+    right.width = ICON_W - 28;
+    right.styleString = 'spacing: 6px;';
+    rightPanel.content.addComponent(right);
 
     var iconTitle = new Label();
     iconTitle.text = 'Mod icon (_polymod_icon.png)';
@@ -229,7 +226,7 @@ class ModpackManagerState extends QOLEditorState
     right.addComponent(foldersTitle);
     var foldersScroll = new funkin.qol.ui.QOLScrollView();
     foldersScroll.width = ICON_W - 22;
-    foldersScroll.height = height - 360;
+    foldersScroll.height = height - 390;
     foldersScroll.horizontalScrollPolicy = 'never';
     folderStatus = new Label();
     folderStatus.width = ICON_W - 50;
@@ -254,11 +251,30 @@ class ModpackManagerState extends QOLEditorState
       if (current != null) QOLFS.openInExplorer('${ModWorkspace.MOD_ROOT}/$current');
     }));
 
+    onLayoutChanged();
     refreshList();
     var first = ModWorkspace.current ?? (folders.length > 0 ? folders[0] : null);
     if (first != null) loadMod(first);
     else
       showEmpty();
+  }
+
+  var centerScroll:Null<funkin.qol.ui.QOLScrollView> = null;
+  var naturalCenterWidth:Float = 0;
+
+  override function onLayoutChanged():Void
+  {
+    if (centerScroll == null) return;
+    var w = Math.max(300, workRight - workLeft - 16);
+    centerScroll.left = workLeft + 8;
+    centerScroll.width = w;
+    var delta = w - naturalCenterWidth;
+    formBox.width = naturalCenterWidth - 40 + delta;
+    var fw = formBox.width - 130;
+    for (f in [titleField, homepageField, licenseField])
+      f.width = fw;
+    for (a in [descField, depsField, optDepsField])
+      a.width = fw;
   }
 
   function labelOf(text:String, width:Float):Label

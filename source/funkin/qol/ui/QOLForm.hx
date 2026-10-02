@@ -40,6 +40,32 @@ class QOLForm extends VBox
   var refreshers:Array<Void->Void> = [];
 
   /**
+   * Re-apply each control's width (so the form can follow its panel when the panel is resized).
+   */
+  var sizers:Array<Void->Void> = [];
+
+  var baseControlWidth:Float = -1;
+
+  function fit(c:Component, width:Void->Float):Void
+  {
+    c.width = width();
+    sizers.push(() -> c.width = width());
+  }
+
+  /**
+   * Widen or narrow the controls by `delta` pixels from the form's original size.
+   */
+  public function fitDelta(delta:Float):Void
+  {
+    if (baseControlWidth < 0) baseControlWidth = controlWidth;
+    var w = Math.max(60, baseControlWidth + delta);
+    if (w == controlWidth) return;
+    controlWidth = w;
+    for (s in sizers)
+      s();
+  }
+
+  /**
    * True while values are being pushed into controls, so change events can be ignored.
    */
   public var refreshing(default, null):Bool = false;
@@ -61,6 +87,7 @@ class QOLForm extends VBox
   {
     removeAllComponents();
     refreshers = [];
+    sizers = [];
   }
 
   /**
@@ -118,7 +145,7 @@ class QOLForm extends VBox
   {
     var label = new Label();
     label.text = text;
-    label.width = labelWidth + controlWidth + 6;
+    fit(label, () -> labelWidth + controlWidth + 6);
     label.styleString = 'color: #A0A0A0; font-size: 11px;';
     addComponent(label);
     return label;
@@ -127,7 +154,7 @@ class QOLForm extends VBox
   public function textField(labelText:String, get:Void->String, set:String->Void, ?placeholder:String):TextField
   {
     var field = new TextField();
-    field.width = controlWidth;
+    fit(field, () -> controlWidth);
     if (placeholder != null) field.placeholder = placeholder;
     field.onChange = function(_) {
       if (refreshing) return;
@@ -146,7 +173,7 @@ class QOLForm extends VBox
   public function textArea(labelText:String, get:Void->String, set:String->Void, height:Float = 80):TextArea
   {
     var field = new TextArea();
-    field.width = labelText == null ? labelWidth + controlWidth + 6 : controlWidth;
+    fit(field, () -> labelText == null ? labelWidth + controlWidth + 6 : controlWidth);
     field.height = height;
     field.onChange = function(_) {
       if (refreshing) return;
@@ -167,7 +194,7 @@ class QOLForm extends VBox
   public function number(labelText:String, get:Void->Float, set:Float->Void, ?min:Float, ?max:Float, step:Float = 1, precision:Int = 2):NumberStepper
   {
     var stepper = new NumberStepper();
-    stepper.width = controlWidth;
+    fit(stepper, () -> controlWidth);
     stepper.min = min ?? -99999;
     stepper.max = max ?? 99999;
     stepper.step = step;
@@ -201,7 +228,7 @@ class QOLForm extends VBox
     var b = new NumberStepper();
     for (s in [a, b])
     {
-      s.width = (controlWidth - 4) / 2;
+      fit(s, () -> (controlWidth - 4) / 2);
       s.min = min ?? -99999;
       s.max = max ?? 99999;
       s.step = step;
@@ -250,7 +277,7 @@ class QOLForm extends VBox
   public function slider(labelText:String, get:Void->Float, set:Float->Void, min:Float, max:Float, step:Float = 0.01):HorizontalSlider
   {
     var s = new HorizontalSlider();
-    s.width = controlWidth;
+    fit(s, () -> controlWidth);
     s.min = min;
     s.max = max;
     s.step = step;
@@ -274,7 +301,8 @@ class QOLForm extends VBox
   public function dropdown(labelText:String, items:Void->Array<String>, get:Void->String, set:String->Void, ?labels:Void->Array<String>):DropDown
   {
     var dd = new DropDown();
-    dd.width = controlWidth;
+    fit(dd, () -> controlWidth);
+    sizers.push(() -> dd.dropdownWidth = Math.max(controlWidth, 180));
     dd.dropdownWidth = Math.max(controlWidth, 180);
     dd.searchable = true;
     var currentItems:Array<String> = [];
@@ -317,7 +345,7 @@ class QOLForm extends VBox
   public function colorField(labelText:String, get:Void->Int, set:Int->Void):ColorPickerPopup
   {
     var picker = new ColorPickerPopup();
-    picker.width = controlWidth;
+    fit(picker, () -> controlWidth);
     var syncing = false;
     function sync()
     {
@@ -366,7 +394,7 @@ class QOLForm extends VBox
   public function ease(labelText:String, get:Void->String, set:String->Void, includeInstant:Bool = false, includeClassic:Bool = false):Button
   {
     var btn = new Button();
-    btn.width = controlWidth;
+    fit(btn, () -> controlWidth);
     btn.iconPosition = 'left';
     function update()
     {
@@ -391,7 +419,7 @@ class QOLForm extends VBox
   {
     var btn = new Button();
     btn.text = text;
-    btn.width = labelWidth + controlWidth + 6;
+    fit(btn, () -> labelWidth + controlWidth + 6);
     btn.onClick = _ -> onClick();
     if (tooltip != null) btn.tooltip = tooltip;
     addComponent(btn);
@@ -402,12 +430,12 @@ class QOLForm extends VBox
   {
     var hbox = new HBox();
     hbox.styleString = 'spacing: 4px;';
-    var w = (labelWidth + controlWidth + 6 - (defs.length - 1) * 4) / defs.length;
+    var count = defs.length;
     for (def in defs)
     {
       var btn = new Button();
       btn.text = def.text;
-      btn.width = w;
+      fit(btn, () -> (labelWidth + controlWidth + 6 - (count - 1) * 4) / count);
       var cb = def.cb;
       btn.onClick = _ -> cb();
       hbox.addComponent(btn);
@@ -424,7 +452,7 @@ class QOLForm extends VBox
     var hbox = new HBox();
     hbox.styleString = 'spacing: 4px;';
     var field = new TextField();
-    field.width = controlWidth - 34;
+    fit(field, () -> controlWidth - 34);
     var btn = new Button();
     btn.text = '...';
     btn.width = 30;

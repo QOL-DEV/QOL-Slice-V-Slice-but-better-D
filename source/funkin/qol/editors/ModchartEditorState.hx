@@ -27,6 +27,7 @@ import funkin.qol.util.QOLSongAudio;
 import haxe.ui.components.Button;
 import haxe.ui.components.Label;
 import haxe.ui.containers.HBox;
+import funkin.qol.ui.QOLDockPanel;
 import haxe.ui.containers.ListView;
 import haxe.ui.containers.TabView;
 import haxe.ui.containers.VBox;
@@ -129,6 +130,10 @@ class ModchartEditorState extends QOLEditorState
     editorName = 'Modchart Editor';
     leftPanelWidth = 0;
     rightPanelWidth = 0;
+    // The timeline (and its transport bar) own the bottom of the screen; drag the border above it to resize it.
+    bottomAreaHeight = FlxG.height - QOLEditorState.STATUSBAR_HEIGHT - TRANSPORT_Y;
+    bottomAreaResizable = true;
+    bottomAreaMin = 150;
     startSong = songId;
   }
 
@@ -151,11 +156,10 @@ class ModchartEditorState extends QOLEditorState
     FlxG.cameras.add(preview.camHUD, false);
     FlxG.cameras.add(camUI, false);
 
-    var frame = QOLTheme.roundRect(Std.int(FlxG.width * PREVIEW_SCALE + 10), Std.int(FlxG.height * PREVIEW_SCALE + 10), 0xFF08080C, 8, 0xFF5A4F80, 2);
-    frame.setPosition(PREVIEW_X - 5, PREVIEW_Y - 5);
-    frame.cameras = [camWorld];
-    frame.scrollFactor.set();
-    add(frame);
+    previewFrame = new FlxSprite();
+    previewFrame.cameras = [camWorld];
+    previewFrame.scrollFactor.set();
+    add(previewFrame);
 
     for (i in 0...4)
     {
@@ -178,6 +182,8 @@ class ModchartEditorState extends QOLEditorState
     buildMenus();
     buildPanel();
     buildTransport();
+    layoutReady = true;
+    relayout();
 
     loadSong(startSong ?? QOLConfig.getPref('modchartEditor.last', null) ?? defaultSong());
   }
@@ -239,12 +245,14 @@ class ModchartEditorState extends QOLEditorState
 
   function buildPanel():Void
   {
+    inspectorPanel = addDockPanel('inspector', 'Inspector', Std.int(FlxG.width - PANEL_X), 'right');
+    inspectorPanel.autoFit = false;
+    inspectorPanel.onPanelResized = _ -> sizePanelContents();
     tabs = new TabView();
-    tabs.left = PANEL_X;
-    tabs.top = QOLEditorState.MENUBAR_HEIGHT + 4;
-    tabs.width = FlxG.width - PANEL_X - 8;
-    tabs.height = TRANSPORT_Y - QOLEditorState.MENUBAR_HEIGHT - 10;
-    root.addComponent(tabs);
+    tabs.width = inspectorPanel.panelWidth - 28;
+    tabs.height = TRANSPORT_Y - QOLEditorState.MENUBAR_HEIGHT - QOLDockPanel.HEADER_HEIGHT - 22;
+    inspectorPanel.content.addComponent(tabs);
+    naturalTabsWidth = tabs.width;
 
     // Inspector.
     var inspPage = new VBox();
@@ -252,6 +260,7 @@ class ModchartEditorState extends QOLEditorState
     inspPage.styleString = 'padding: 6px;';
     tabs.addComponent(inspPage);
     var scroll = new funkin.qol.ui.QOLScrollView();
+    inspectorScroll = scroll;
     scroll.width = tabs.width - 16;
     scroll.height = tabs.height - 44;
     scroll.horizontalScrollPolicy = 'never';
@@ -353,9 +362,84 @@ class ModchartEditorState extends QOLEditorState
     return l;
   }
 
+  //
+  // Layout (the inspector panel can be moved, resized, collapsed or floated; the timeline can be made taller or shorter)
+  //
+
+  var inspectorPanel:QOLDockPanel;
+  var inspectorScroll:funkin.qol.ui.QOLScrollView;
+  var previewFrame:FlxSprite;
+  var transportBar:HBox;
+  var naturalTabsWidth:Float = 0;
+  var layoutReady:Bool = false;
+
+  override function onLayoutChanged():Void
+  {
+    if (layoutReady) relayout();
+  }
+
+  /**
+   * Fit the preview into the space left by the panels, and put the transport bar and timeline under it.
+   */
+  function relayout():Void
+  {
+    var areaX = workLeft + 10;
+    var areaW = Math.max(100, workRight - workLeft - 20);
+    var areaY = QOLEditorState.MENUBAR_HEIGHT + 8;
+    var areaH = Math.max(60, workBottom - areaY - 8);
+    var sc = Math.max(0.05, Math.min(areaW / FlxG.width, areaH / FlxG.height));
+    var pw = FlxG.width * sc;
+    var ph = FlxG.height * sc;
+    var px = areaX + (areaW - pw) / 2;
+    var py = areaY + (areaH - ph) / 2;
+    preview.setBox(px, py, sc);
+    var fw = Std.int(pw + 10);
+    var fh = Std.int(ph + 10);
+    previewFrame.loadGraphic(QOLTheme.cached('qol-mc-frame-$fw-$fh', () -> QOLTheme.drawRound(fw, fh, 0xFF08080C, 8, 0xFF5A4F80, 2)));
+    previewFrame.setPosition(px - 5, py - 5);
+    if (transportBar != null)
+    {
+      transportBar.left = 10;
+      transportBar.top = workBottom + 4;
+      transportBar.width = FlxG.width - 20;
+    }
+    var ty = workBottom + 34;
+    timeline.setBounds(0, ty, FlxG.width, FlxG.height - ty - QOLEditorState.STATUSBAR_HEIGHT);
+    sizePanelContents();
+  }
+
+  /**
+   * Size the inspector's tabs to its panel.
+   */
+  function sizePanelContents():Void
+  {
+    if (tabs == null || inspectorPanel == null) return;
+    var p = inspectorPanel;
+    var cw = p.panelWidth - 28;
+    var panelH = p.isFloating ? Math.min(p.floatHeight, workBottom - QOLEditorState.MENUBAR_HEIGHT) : workBottom - QOLEditorState.MENUBAR_HEIGHT;
+    var ch = Math.max(120, panelH - QOLDockPanel.HEADER_HEIGHT - 22);
+    p.content.width = cw;
+    tabs.width = cw;
+    tabs.height = ch;
+    inspectorScroll.width = cw - 16;
+    inspectorScroll.height = ch - 44;
+    inspectorBox.width = cw - 40;
+    var listH = Math.max(60, ch - 120);
+    var colW = (cw - 40) / 2;
+    libTargets.width = colW;
+    libProps.width = colW;
+    libTargets.height = listH;
+    libProps.height = listH;
+    libDesc.width = cw - 30;
+    var delta = cw - naturalTabsWidth;
+    songForm.fitDelta(delta);
+    if (inspectorForm != null) inspectorForm.fitDelta(delta);
+  }
+
   function buildTransport():Void
   {
     var bar = new HBox();
+    transportBar = bar;
     bar.left = PREVIEW_X;
     bar.top = TRANSPORT_Y;
     bar.width = FlxG.width - PREVIEW_X * 2;
@@ -974,6 +1058,7 @@ class ModchartEditorState extends QOLEditorState
       form.note('Space plays, Enter playtests, Ctrl+S saves into your mod. Keys: drag to move, right-click to delete, double-click a track to add one.');
     }
     inspectorBox.addComponent(form);
+    if (naturalTabsWidth > 0 && tabs != null) form.fitDelta(tabs.width - naturalTabsWidth);
   }
 
   function refreshLibraryTargets():Void
@@ -1253,10 +1338,10 @@ class ModchartEditorState extends QOLEditorState
     var p1 = preview.hudToScreen(b.x, b.y);
     var p2 = preview.hudToScreen(b.right, b.bottom);
     b.put();
-    var x1 = Math.max(PREVIEW_X, p1.x - 2);
-    var y1 = Math.max(PREVIEW_Y, p1.y - 2);
-    var x2 = Math.min(PREVIEW_X + FlxG.width * PREVIEW_SCALE, p2.x + 2);
-    var y2 = Math.min(PREVIEW_Y + FlxG.height * PREVIEW_SCALE, p2.y + 2);
+    var x1 = Math.max(preview.x, p1.x - 2);
+    var y1 = Math.max(preview.y, p1.y - 2);
+    var x2 = Math.min(preview.x + FlxG.width * preview.scale, p2.x + 2);
+    var y2 = Math.min(preview.y + FlxG.height * preview.scale, p2.y + 2);
     p1.put();
     p2.put();
     if (x2 <= x1 || y2 <= y1)

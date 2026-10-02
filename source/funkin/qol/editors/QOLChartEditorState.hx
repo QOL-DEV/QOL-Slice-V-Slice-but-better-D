@@ -101,6 +101,8 @@ class QOLChartEditorState extends QOLEditorState
     editorName = 'Chart Editor';
     leftPanelWidth = 300;
     rightPanelWidth = 300;
+    leftPanelTitle = 'Song';
+    rightPanelTitle = 'Events';
     startSong = songId;
     startDifficulty = difficulty;
     startVariation = variation;
@@ -144,11 +146,16 @@ class QOLChartEditorState extends QOLEditorState
     if (startPosition > 0) seek(startPosition);
   }
 
+  override function onLayoutChanged():Void
+  {
+    if (view != null) layoutView();
+  }
+
   function layoutView()
   {
-    view.x = leftPanelWidth + 10;
+    view.x = workLeft + 10;
     view.y = QOLEditorState.MENUBAR_HEIGHT + 6;
-    view.width = FlxG.width - leftPanelWidth - rightPanelWidth - 70;
+    view.width = Math.max(200, workRight - workLeft - 70);
     view.height = FlxG.height - QOLEditorState.MENUBAR_HEIGHT - QOLEditorState.STATUSBAR_HEIGHT - 10;
     view.forceLayout();
   }

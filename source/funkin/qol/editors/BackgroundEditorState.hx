@@ -104,6 +104,8 @@ class BackgroundEditorState extends QOLEditorState
     editorName = 'Background Editor';
     leftPanelWidth = 320;
     rightPanelWidth = 360;
+    leftPanelTitle = 'Stage';
+    rightPanelTitle = 'Props & Events';
     if (id != null) stageId = id;
   }
 
@@ -128,7 +130,7 @@ class BackgroundEditorState extends QOLEditorState
     selectionBox.visible = false;
     add(selectionBox);
 
-    infoText = QOLTheme.text(leftPanelWidth + 12, QOLEditorState.MENUBAR_HEIGHT + 8, 520, '', 13, QOLTheme.FONT_MONO, 0xFFE8E0FF);
+    infoText = QOLTheme.text(workLeft + 12, QOLEditorState.MENUBAR_HEIGHT + 8, 520, '', 13, QOLTheme.FONT_MONO, 0xFFE8E0FF);
     infoText.setBorderStyle(OUTLINE, 0xFF000000, 1);
     infoText.cameras = [camUI];
     add(infoText);
@@ -1387,7 +1389,12 @@ class BackgroundEditorState extends QOLEditorState
   //
 
   function viewportCenterX():Float
-    return leftPanelWidth + (FlxG.width - leftPanelWidth - rightPanelWidth) / 2;
+    return workLeft + (workRight - workLeft) / 2;
+
+  override function onLayoutChanged():Void
+  {
+    if (infoText != null) infoText.x = workLeft + 12;
+  }
 
   function resetCamera()
   {

@@ -82,6 +82,8 @@ class DeathEditorState extends QOLEditorState
     editorName = 'Death Animation Editor';
     leftPanelWidth = 330;
     rightPanelWidth = 340;
+    leftPanelTitle = 'Death Settings';
+    rightPanelTitle = 'Overlays & Actions';
     if (characterId != null) charId = characterId;
   }
 
@@ -94,13 +96,8 @@ class DeathEditorState extends QOLEditorState
     gridBG.visible = false;
     camWorld.bgColor = 0xFF151022;
 
-    // Preview cameras, scaled to show a whole 1280x720 game screen inside the viewport.
-    var areaW = FlxG.width - leftPanelWidth - rightPanelWidth - PREVIEW_MARGIN * 2;
-    previewScale = areaW / FlxG.width;
-    previewW = Std.int(FlxG.width * previewScale);
-    previewH = Std.int(FlxG.height * previewScale);
-    previewX = leftPanelWidth + PREVIEW_MARGIN;
-    previewY = QOLEditorState.MENUBAR_HEIGHT + 34;
+    // Preview cameras, scaled to show a whole game screen inside the work area.
+    computePreviewLayout();
 
     // Full-size 1280x720 cameras at normal zoom, shrunk into the preview box by scaling their display.
     // This keeps the view math identical to the real game (overlays stay in screen space).
@@ -128,9 +125,9 @@ class DeathEditorState extends QOLEditorState
     add(followPoint);
 
 
-    var title = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, 'Game over preview (${FlxG.width}x${FlxG.height})', 15, QOLTheme.TEXT_DIM, 1.5);
-    title.cameras = [camUI];
-    add(title);
+    previewTitle = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, 'Game over preview (${FlxG.width}x${FlxG.height})', 15, QOLTheme.TEXT_DIM, 1.5);
+    previewTitle.cameras = [camUI];
+    add(previewTitle);
     phaseLabel = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, '', 15, QOLTheme.ACCENT_YELLOW, 1.5);
     phaseLabel.alignment = RIGHT;
     phaseLabel.cameras = [camUI];
@@ -163,6 +160,53 @@ class DeathEditorState extends QOLEditorState
   }
 
   var previewDisplay:Null<funkin.qol.ui.QOLScaledCameras> = null;
+  var previewTitle:Null<FlxText> = null;
+  var timelineSprites:Array<FlxSprite> = [];
+
+  /**
+   * Fit the preview (and the timeline under it) into the space between the panels.
+   */
+  function computePreviewLayout():Void
+  {
+    var areaW = Math.max(200, workRight - workLeft - PREVIEW_MARGIN * 2);
+    // Leave room for the timeline (3 rows + ruler) under the preview.
+    var areaH = FlxG.height - QOLEditorState.MENUBAR_HEIGHT - QOLEditorState.STATUSBAR_HEIGHT - 34 - 150;
+    previewScale = Math.min(areaW / FlxG.width, areaH / FlxG.height);
+    previewW = Std.int(FlxG.width * previewScale);
+    previewH = Std.int(FlxG.height * previewScale);
+    previewX = workLeft + PREVIEW_MARGIN + (areaW - previewW) / 2;
+    previewY = QOLEditorState.MENUBAR_HEIGHT + 34;
+  }
+
+  override function onLayoutChanged():Void
+  {
+    if (previewDisplay == null) return;
+    computePreviewLayout();
+    previewDisplay.x = previewX;
+    previewDisplay.y = previewY;
+    previewDisplay.scale = previewScale;
+    previewDisplay.place();
+    if (previewTitle != null)
+    {
+      previewTitle.x = previewX;
+      previewTitle.fieldWidth = previewW;
+    }
+    if (phaseLabel != null)
+    {
+      phaseLabel.x = previewX;
+      phaseLabel.fieldWidth = previewW;
+    }
+    for (spr in timelineSprites)
+    {
+      remove(spr, true);
+      spr.destroy();
+    }
+    timelineSprites = [];
+    var playheadVisible = playhead != null && playhead.visible;
+    buildTimeline();
+    playhead.visible = playheadVisible;
+    rebuildMarkers();
+  }
 
   function placePreviewCamera(cam:FlxCamera)
   {
@@ -549,11 +593,13 @@ class DeathEditorState extends QOLEditorState
     }));
     ruler.cameras = [camUI];
     add(ruler);
+    timelineSprites.push(ruler);
     for (i in 0...rows.length)
     {
       var l = QOLTheme.outlinedText(previewX, timelineY + i * 30 + 7, 66, rows[i], 13, QOLTheme.TEXT_DIM, 1);
       l.cameras = [camUI];
       add(l);
+      timelineSprites.push(l);
     }
     var s = 0;
     while (s <= TIMELINE_SECONDS)
@@ -561,12 +607,14 @@ class DeathEditorState extends QOLEditorState
       var l = QOLTheme.text(timelineX + s / TIMELINE_SECONDS * timelineW - 10, timelineY - 18, 30, '${s}s', 11, QOLTheme.FONT_MONO, QOLTheme.TEXT_DIM);
       l.cameras = [camUI];
       add(l);
+      timelineSprites.push(l);
       s++;
     }
     playhead = new FlxSprite().makeGraphic(2, 96, 0xFFFF3355);
     playhead.cameras = [camUI];
     playhead.visible = false;
     add(playhead);
+    timelineSprites.push(playhead);
   }
 
   function rebuildMarkers()

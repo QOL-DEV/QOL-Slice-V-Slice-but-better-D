@@ -110,6 +110,21 @@ class ModchartPreview
   }
 
   /**
+   * Move/resize the preview box (when the editor's layout changes).
+   */
+  public function setBox(x:Float, y:Float, scale:Float):Void
+  {
+    this.x = x;
+    this.y = y;
+    this.scale = scale;
+    display.x = x;
+    display.y = y;
+    display.scale = scale;
+    host.cameraOffsetScale = scale;
+    display.place();
+  }
+
+  /**
    * Position the preview cameras (call every frame before the modchart applies camera offsets).
    */
   public function place():Void

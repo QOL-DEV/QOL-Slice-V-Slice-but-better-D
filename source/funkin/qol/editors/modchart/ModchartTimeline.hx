@@ -138,10 +138,11 @@ class ModchartTimeline extends FlxGroup
     rulerBg = rect(x + LABEL_W, y, width - LABEL_W, RULER_H, 0xFF26283A);
     notesBg = rect(x + LABEL_W, y + RULER_H, width - LABEL_W, NOTES_H, 0xFF15161B);
     divider = rect(x + LABEL_W - 1, y, 1, height, 0xFF3A3F4F);
-    var top = rect(x, y, width, 1, 0xFF3A3F4F);
+    topLine = rect(x, y, width, 1, 0xFF3A3F4F);
+    var top = topLine;
     hintText = QOLTheme.text(x + 8, y + 3, LABEL_W - 16, 'TIMELINE', 12, QOLTheme.FONT_TITLE, QOLTheme.ACCENT_PINK);
     prep(hintText);
-    var notesLabel = QOLTheme.text(x + 8, y + RULER_H, LABEL_W - 16, 'Notes', 10, QOLTheme.FONT_BODY, 0xFF8A86A8);
+    notesLabel = QOLTheme.text(x + 8, y + RULER_H, LABEL_W - 16, 'Notes', 10, QOLTheme.FONT_BODY, 0xFF8A86A8);
     prep(notesLabel);
     add(bgSpr);
     add(labelBg);
@@ -164,6 +165,34 @@ class ModchartTimeline extends FlxGroup
     playheadCap = new FlxSprite().loadGraphic(arrowDown);
     playheadCap.color = 0xFFFF4D6D;
     prep(playheadCap);
+  }
+
+  var topLine:FlxSprite;
+  var notesLabel:FlxText;
+
+  /**
+   * Move/resize the timeline (when the editor's layout changes).
+   */
+  public function setBounds(x:Float, y:Float, width:Float, height:Float):Void
+  {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    function put(s:FlxSprite, px:Float, py:Float, w:Float, h:Float)
+    {
+      s.setGraphicSize(Std.int(Math.max(1, w)), Std.int(Math.max(1, h)));
+      s.updateHitbox();
+      s.setPosition(px, py);
+    }
+    put(bgSpr, x, y, width, height);
+    put(labelBg, x, y, LABEL_W, height);
+    put(rulerBg, x + LABEL_W, y, width - LABEL_W, RULER_H);
+    put(notesBg, x + LABEL_W, y + RULER_H, width - LABEL_W, NOTES_H);
+    put(divider, x + LABEL_W - 1, y, 1, height);
+    put(topLine, x, y, width, 1);
+    hintText.setPosition(x + 8, y + 3);
+    notesLabel.setPosition(x + 8, y + RULER_H);
   }
 
   /**

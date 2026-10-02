@@ -100,6 +100,8 @@ class CharacterEditorState extends QOLEditorState
     editorName = 'Character Editor';
     leftPanelWidth = 340;
     rightPanelWidth = 340;
+    leftPanelTitle = 'Character';
+    rightPanelTitle = 'Animations';
     if (id != null) charId = id;
   }
 
@@ -128,26 +130,25 @@ class CharacterEditorState extends QOLEditorState
     camMarker.color = 0xFF5CE1FF;
     add(camMarker);
 
-    errorText = QOLTheme.outlinedText(leftPanelWidth + 20, 110, FlxG.width - leftPanelWidth - rightPanelWidth - 40, '', 18, QOLTheme.ACCENT_YELLOW, 2);
+    errorText = QOLTheme.outlinedText(workLeft + 20, 110, workRight - workLeft - 40, '', 18, QOLTheme.ACCENT_YELLOW, 2);
     errorText.cameras = [camUI];
     errorText.alignment = CENTER;
     add(errorText);
 
-    infoText = QOLTheme.text(leftPanelWidth + 12, QOLEditorState.MENUBAR_HEIGHT + 8, 420, '', 13, QOLTheme.FONT_MONO, 0xFFE8E0FF);
+    infoText = QOLTheme.text(workLeft + 12, QOLEditorState.MENUBAR_HEIGHT + 8, 420, '', 13, QOLTheme.FONT_MONO, 0xFFE8E0FF);
     infoText.setBorderStyle(OUTLINE, 0xFF000000, 1);
     infoText.cameras = [camUI];
     add(infoText);
 
     // Health bar preview (bottom of the viewport).
-    var vx = leftPanelWidth + 20;
-    var vw = FlxG.width - leftPanelWidth - rightPanelWidth - 40;
-    barLeft = new FlxSprite(vx, FlxG.height - QOLEditorState.STATUSBAR_HEIGHT - 40).makeGraphic(Std.int(vw / 2), 14, FlxColor.WHITE);
-    barRight = new FlxSprite(vx + vw / 2, barLeft.y).makeGraphic(Std.int(vw / 2), 14, FlxColor.WHITE);
+    barLeft = new FlxSprite().makeGraphic(1, 14, FlxColor.WHITE);
+    barRight = new FlxSprite().makeGraphic(1, 14, FlxColor.WHITE);
     for (b in [barLeft, barRight])
     {
       b.cameras = [camUI];
       add(b);
     }
+    placeHealthBar();
 
     buildPropertiesPanel();
     buildAnimationsPanel();
@@ -839,15 +840,46 @@ class CharacterEditorState extends QOLEditorState
       @:privateAccess iconPreview.autoUpdate = false;
       iconPreview.configure(icon());
       iconPreview.cameras = [camUI];
-      iconPreview.x = barLeft.x + barLeft.width * 2 / 2 - iconPreview.width / 2 + 40;
-      iconPreview.y = barLeft.y - iconPreview.height / 2 + 7;
       add(iconPreview);
+      placeHealthBar();
     }
     catch (e)
     {
       trace('[QOL] Icon preview failed: $e');
     }
     updateBar();
+  }
+
+  /**
+   * Health bar preview along the bottom of the view (follows the panels when they move).
+   */
+  function placeHealthBar():Void
+  {
+    var vx = workLeft + 20;
+    var vw = Math.max(80, workRight - workLeft - 40);
+    var y = FlxG.height - QOLEditorState.STATUSBAR_HEIGHT - 40;
+    barLeft.setGraphicSize(Std.int(vw / 2), 14);
+    barLeft.updateHitbox();
+    barLeft.setPosition(vx, y);
+    barRight.setGraphicSize(Std.int(vw / 2), 14);
+    barRight.updateHitbox();
+    barRight.setPosition(vx + vw / 2, y);
+    if (iconPreview != null)
+    {
+      iconPreview.x = barLeft.x + barLeft.width - iconPreview.width / 2 + 40;
+      iconPreview.y = barLeft.y - iconPreview.height / 2 + 7;
+    }
+  }
+
+  override function onLayoutChanged():Void
+  {
+    if (errorText != null)
+    {
+      errorText.x = workLeft + 20;
+      errorText.fieldWidth = Math.max(80, workRight - workLeft - 40);
+    }
+    if (infoText != null) infoText.x = workLeft + 12;
+    if (barLeft != null) placeHealthBar();
   }
 
   function updateBar()
@@ -1244,7 +1276,7 @@ class CharacterEditorState extends QOLEditorState
   //
 
   function viewportCenterX():Float
-    return leftPanelWidth + (FlxG.width - leftPanelWidth - rightPanelWidth) / 2;
+    return workLeft + (workRight - workLeft) / 2;
 
   function resetCamera()
   {
