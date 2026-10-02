@@ -34,6 +34,16 @@ typedef AnimRenderOptions =
    * Show every layer as outlines.
    */
   var ?allOutlines:Bool;
+
+  /**
+   * Draw through this camera (world -> stage). Exports of the main timeline use its camera automatically.
+   */
+  var ?camera:Matrix;
+
+  /**
+   * Leave the camera out (exports).
+   */
+  var ?noCamera:Bool;
 }
 
 typedef AnimHit =
@@ -67,7 +77,64 @@ class AnimRender
   public function render(sym:AnimSymbol, frame:Int, ?opts:AnimRenderOptions):Sprite
   {
     hits = [];
-    return renderSymbol(sym, frame, opts ?? {}, 0, true);
+    opts = opts ?? {};
+    var root = renderSymbol(sym, frame, opts, 0, true);
+    var cam = opts.camera;
+    if (cam == null && opts.forExport == true && opts.noCamera != true && sym == doc.main) cam = cameraMatrix(sym, frame);
+    if (cam == null) return root;
+    var wrap = new Sprite();
+    wrap.addChild(root);
+    wrap.transform.matrix = cam;
+    return wrap;
+  }
+
+  /**
+   * The camera at a frame (with its tween), or null if the timeline has no camera.
+   */
+  public function cameraAt(sym:AnimSymbol, frame:Int):Null<AnimCamera>
+  {
+    var layer = AnimData.cameraLayer(sym);
+    if (layer == null || !layer.visible) return null;
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null)
+    {
+      // After the camera layer ends, it holds its last keyframe.
+      key = layer.frames.length > 0 ? layer.frames[layer.frames.length - 1] : null;
+      if (key == null || key.camera == null) return null;
+      return key.camera;
+    }
+    var cam = key.camera ?? AnimData.defaultCamera(doc.project);
+    if (key.tween == null || frame <= key.start) return cam;
+    var idx = layer.frames.indexOf(key);
+    if (idx < 0 || idx + 1 >= layer.frames.length || layer.frames[idx + 1].camera == null) return cam;
+    var next = layer.frames[idx + 1].camera;
+    var t = QOLEase.get(key.tween.ease)((frame - key.start) / key.duration);
+    var dr = next.rotation - cam.rotation;
+    return {
+      x: lerp(cam.x, next.x, t),
+      y: lerp(cam.y, next.y, t),
+      zoom: lerp(cam.zoom, next.zoom, t),
+      rotation: cam.rotation + (dr + (key.tween.spins ?? 0) * 360) * t
+    };
+  }
+
+  /**
+   * World -> stage for a camera.
+   */
+  public function matrixOf(cam:AnimCamera):Matrix
+  {
+    var m = new Matrix();
+    m.translate(-cam.x, -cam.y);
+    m.rotate(-cam.rotation * Math.PI / 180);
+    m.scale(cam.zoom, cam.zoom);
+    m.translate(doc.project.width / 2, doc.project.height / 2);
+    return m;
+  }
+
+  public function cameraMatrix(sym:AnimSymbol, frame:Int):Null<Matrix>
+  {
+    var cam = cameraAt(sym, frame);
+    return cam == null ? null : matrixOf(cam);
   }
 
   function renderSymbol(sym:AnimSymbol, frame:Int, opts:AnimRenderOptions, depth:Int, top:Bool):Sprite
@@ -83,6 +150,7 @@ class AnimRender
       i--;
       if (!layer.visible) continue;
       if (opts.forExport == true && layer.guide == true) continue;
+      if (layer.kind == 'camera' || layer.kind == 'audio') continue;
       var key = AnimData.keyAt(layer, frame);
       if (key == null) continue;
       var layerSprite = new Sprite();

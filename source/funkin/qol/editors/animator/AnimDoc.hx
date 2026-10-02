@@ -139,6 +139,20 @@ class AnimDoc
   }
 
   /**
+   * Swap a bitmap's pixels (e.g. a canvas that grew), keeping its id.
+   */
+  public function replaceBitmap(id:String, bmp:BitmapData):Void
+  {
+    bitmaps.set(id, bmp);
+    var info = bitmapInfo(id);
+    if (info != null)
+    {
+      info.width = bmp.width;
+      info.height = bmp.height;
+    }
+  }
+
+  /**
    * A blank canvas the size of the stage (for bitmap layer keyframes).
    */
   public function newCanvas():String

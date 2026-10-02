@@ -69,6 +69,7 @@ class AnimTimelineView extends FlxGroup
   var gPen:FlxGraphic;
   var gPixels:FlxGraphic;
   var gGuide:FlxGraphic;
+  var gCamera:FlxGraphic;
   var gTag:FlxGraphic;
   var gArrow:FlxGraphic;
   var playheadGlow:FlxSprite;
@@ -100,6 +101,7 @@ class AnimTimelineView extends FlxGroup
     gPen = AnimatorSkin.iconGraphic('pen', 14, 0xFFFFFFFF, false);
     gPixels = AnimatorSkin.iconGraphic('pixels', 14, 0xFFFFFFFF, false);
     gGuide = AnimatorSkin.iconGraphic('guide', 14, 0xFFFFFFFF, false);
+    gCamera = AnimatorSkin.iconGraphic('camera', 14, 0xFFFFFFFF, false);
     gArrow = QOLTheme.cached('anim-tween-arrow', () -> {
       var sh = new Shape();
       sh.graphics.beginFill(0xFFFFFF, 1);
@@ -390,7 +392,8 @@ class AnimTimelineView extends FlxGroup
       // Label column.
       span(x + 4, ry + 3, 4, ROW_H - 7, layer.color);
       if (selected) span(x + 8, ry + 3, 2, ROW_H - 7, layer.color, 0.35);
-      icon(layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen), x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
+      var kindIcon = layer.kind == 'camera' ? gCamera : (layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen));
+      icon(kindIcon, x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
       txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? AnimatorSkin.TEXT_SOFT : AnimatorSkin.TEXT_FAINT));
       icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 60, ry + 5);
       icon(layer.locked ? gLockOn : gLockOff, x + LABEL_W - 41, ry + 5);
@@ -410,7 +413,7 @@ class AnimTimelineView extends FlxGroup
         var kx = frameX(k.start);
         var kw = k.duration * cellW;
         if (kx > x + width || kx + kw < gridX) continue;
-        var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null);
+        var has = k.elements.length > 0 || (layer.kind == 'bitmap' && k.bitmap != null) || k.camera != null;
         var color:FlxColor = k.tween != null ? mix(rowColor, AnimatorSkin.ACCENT2, 0.55) : (has ? mix(rowColor, layer.color, 0.32) : mix(rowColor, AnimatorSkin.BORDER, 0.5));
         var sx = Math.max(gridX, kx + 1);
         var ex = Math.min(x + width, kx + kw);

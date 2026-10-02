@@ -113,6 +113,26 @@ class AnimatorState extends QOLEditorState
   public var zoom:Float = 0.6;
   public var viewX:Float = 0;
   public var viewY:Float = 0;
+
+  /**
+   * View rotation in degrees (turning the canvas like a sheet of paper; doesn't change the drawing).
+   */
+  public var viewRotation:Float = 0;
+
+  /**
+   * View mirrored left-right (doesn't change the drawing).
+   */
+  public var viewFlip:Bool = false;
+
+  /**
+   * Show the stage through the camera (when the timeline has one).
+   */
+  public var cameraView:Bool = true;
+
+  /**
+   * Hide everything outside the stage.
+   */
+  public var clipStage:Bool = false;
   public var onion:Bool = false;
   public var onionBefore:Int = 2;
   public var onionAfter:Int = 2;
@@ -129,6 +149,9 @@ class AnimatorState extends QOLEditorState
   var onionHolder:Sprite;
   var contentHolder:Sprite;
   var liveShape:Shape;
+  var worldHolder:Sprite;
+  var camFrame:Shape;
+  var stageMask:Shape;
   var overlay:Shape;
   var renderDirty:Bool = true;
 
@@ -159,6 +182,13 @@ class AnimatorState extends QOLEditorState
   var loopButton:Button;
   var onionButton:Button;
   var badge:Label;
+  var viewBar:HBox;
+  var zoomLabel:Button;
+  var rotLabel:Button;
+  var flipButton:Button;
+  var clipButton:Button;
+  var camViewButton:Button;
+  var canvasButton:Button;
   var themeButton:Button;
   var decor:AnimCanvasDecor;
   var stageDecor:Shape;
@@ -206,12 +236,20 @@ class AnimatorState extends QOLEditorState
     canvasRoot.addChild(stageHolder);
     checker = new Shape();
     stageHolder.addChild(checker);
+    // The drawing itself sits in "world" coordinates, seen through the camera.
+    worldHolder = new Sprite();
+    stageHolder.addChild(worldHolder);
     onionHolder = new Sprite();
-    stageHolder.addChild(onionHolder);
+    worldHolder.addChild(onionHolder);
     contentHolder = new Sprite();
-    stageHolder.addChild(contentHolder);
+    worldHolder.addChild(contentHolder);
     liveShape = new Shape();
-    stageHolder.addChild(liveShape);
+    worldHolder.addChild(liveShape);
+    camFrame = new Shape();
+    worldHolder.addChild(camFrame);
+    stageMask = new Shape();
+    stageHolder.addChild(stageMask);
+    stageMask.visible = false;
     overlay = new Shape();
     canvasRoot.addChild(overlay);
 
@@ -229,6 +267,7 @@ class AnimatorState extends QOLEditorState
     buildToolsPanel();
     buildInspector();
     buildControls();
+    buildViewBar();
     applySkin();
     timeline = new AnimTimelineView(this, camUI);
     add(timeline);
@@ -400,6 +439,11 @@ class AnimatorState extends QOLEditorState
     ctrlBar.top = workBottom;
     ctrlBar.width = FlxG.width;
     ctrlBar.height = CONTROLS_H;
+    if (viewBar != null)
+    {
+      viewBar.left = workRight - (viewBar.width > 0 ? viewBar.width : 420) - 10;
+      viewBar.top = workBottom - 34;
+    }
     if (badge != null)
     {
       badge.left = FlxG.width - 128 - 8;
@@ -482,6 +526,7 @@ class AnimatorState extends QOLEditorState
     addMenuSeparator(insert);
     addMenuItem(insert, 'New Layer', null, () -> addLayer('vector'));
     addMenuItem(insert, 'New Bitmap Layer', null, () -> addLayer('bitmap'));
+    addMenuItem(insert, 'Add Camera', null, () -> addCamera());
     addMenuItem(insert, 'Delete Layer', null, deleteLayer);
     addMenuItem(insert, 'Duplicate Layer', null, duplicateLayer);
 
@@ -501,6 +546,12 @@ class AnimatorState extends QOLEditorState
     addMenuCheck(view, 'Loop Playback', loopPlayback, v -> loopPlayback = v);
     addMenuSeparator(view);
     addMenuItem(view, 'Theme...', null, () -> openThemeDialog());
+    addMenuItem(view, 'Canvas Color...', null, () -> openCanvasColorDialog());
+    addMenuSeparator(view);
+    addMenuItem(view, 'Turn View Left', null, () -> rotateView(-15));
+    addMenuItem(view, 'Turn View Right', null, () -> rotateView(15));
+    addMenuItem(view, 'Straighten View', null, () -> rotateView(0, true));
+    addMenuItem(view, 'Mirror View', null, () -> flipView());
 
     var control = addMenu('Control');
     addMenuItem(control, 'Play / Stop', 'Enter', togglePlay);
@@ -705,6 +756,7 @@ class AnimatorState extends QOLEditorState
     ctrlBar.addComponent(gap(10));
     ctrlBar.addComponent(colored(iconButton('layer', 'Layer', 'New vector layer', () -> addLayer('vector'), 16, AnimatorSkin.CYAN), 'cyan'));
     ctrlBar.addComponent(colored(iconButton('bitmap', 'Paint Layer', 'New bitmap layer, for painting pixels', () -> addLayer('bitmap'), 16, AnimatorSkin.GREEN), 'green'));
+    ctrlBar.addComponent(colored(iconButton('camera', null, 'Camera: add an animatable camera (pan, zoom, turn)', () -> addCamera(), 16, AnimatorSkin.YELLOW), 'yellow'));
     ctrlBar.addComponent(colored(iconButton('trash', null, 'Delete the selected layer', deleteLayer, 16, 0xFFFF6B6B), 'red'));
     ctrlBar.addComponent(gap(10));
     ctrlBar.addComponent(colored(iconButton('frame', 'Frame', 'Insert frame (F5)', () -> insertFrames(1), 16, 0xFFEDE6FF), 'purple'));
@@ -926,7 +978,7 @@ class AnimatorState extends QOLEditorState
   public function fitView():Void
   {
     var w = Math.max(100, workRight - workLeft - 60);
-    var h = Math.max(100, workBottom - QOLEditorState.MENUBAR_HEIGHT - 60);
+    var h = Math.max(100, workBottom - QOLEditorState.MENUBAR_HEIGHT - 90);
     zoom = Math.min(w / doc.project.width, h / doc.project.height);
     zoom = Math.max(0.05, Math.min(8, zoom));
     centerStage();
@@ -934,17 +986,83 @@ class AnimatorState extends QOLEditorState
 
   function centerStage():Void
   {
-    viewX = centerX() - doc.project.width * zoom / 2;
-    viewY = centerY() - doc.project.height * zoom / 2;
+    viewX = 0;
+    viewY = 0;
+    var p = stageMatrix().transformPoint(new Point(doc.project.width / 2, doc.project.height / 2));
+    viewX = centerX() - p.x;
+    viewY = centerY() - p.y;
   }
 
   function zoomAt(factor:Float, sx:Float, sy:Float):Void
   {
     var nz = Math.max(0.05, Math.min(16, zoom * factor));
     // Keep the point under the cursor still.
-    viewX = sx - (sx - viewX) * nz / zoom;
-    viewY = sy - (sy - viewY) * nz / zoom;
-    zoom = nz;
+    keepPointWhile(sx, sy, () -> zoom = nz);
+  }
+
+  /**
+   * Change the view while keeping the stage point under (sx, sy) where it is.
+   */
+  function keepPointWhile(sx:Float, sy:Float, change:Void->Void):Void
+  {
+    var inv = stageMatrix();
+    inv.invert();
+    var p = inv.transformPoint(new Point(sx, sy));
+    change();
+    var q = stageMatrix().transformPoint(p);
+    viewX += sx - q.x;
+    viewY += sy - q.y;
+  }
+
+  public function rotateView(deg:Float, ?absolute:Bool = false):Void
+  {
+    keepPointWhile(centerX(), centerY(), () -> {
+      viewRotation = absolute ? deg : viewRotation + deg;
+      viewRotation = ((viewRotation % 360) + 540) % 360 - 180;
+      if (Math.abs(viewRotation) < 0.01) viewRotation = 0;
+    });
+  }
+
+  public function flipView():Void
+  {
+    keepPointWhile(centerX(), centerY(), () -> viewFlip = !viewFlip);
+  }
+
+  /**
+   * Stage coordinates -> screen (game) coordinates: zoom, rotation and flip around the stage's middle.
+   */
+  public function stageMatrix():Matrix
+  {
+    var w = doc.project.width, h = doc.project.height;
+    var m = new Matrix();
+    m.translate(-w / 2, -h / 2);
+    if (viewFlip) m.scale(-1, 1);
+    if (viewRotation != 0) m.rotate(viewRotation * Math.PI / 180);
+    m.scale(zoom, zoom);
+    m.translate(w / 2 * zoom + viewX, h / 2 * zoom + viewY);
+    return m;
+  }
+
+  /**
+   * The camera's world -> stage matrix while it's shown (main timeline only), or null.
+   */
+  function viewCamera():Null<Matrix>
+  {
+    if (!cameraView || editPath.length > 0) return null;
+    return renderer.cameraMatrix(sym, frame);
+  }
+
+  /**
+   * Symbol coordinates -> screen.
+   */
+  function fullMatrix():Matrix
+  {
+    var m = new Matrix();
+    m.translate(symOffsetX(), symOffsetY());
+    var cam = viewCamera();
+    if (cam != null) m.concat(cam);
+    m.concat(stageMatrix());
+    return m;
   }
 
   /**
@@ -960,10 +1078,38 @@ class AnimatorState extends QOLEditorState
    * Screen (game) position -> coordinates in the symbol being edited.
    */
   public function toLocal(sx:Float, sy:Float):Point
-    return new Point((sx - viewX) / zoom - symOffsetX(), (sy - viewY) / zoom - symOffsetY());
+  {
+    var m = fullMatrix();
+    m.invert();
+    return m.transformPoint(new Point(sx, sy));
+  }
 
   public function toScreen(lx:Float, ly:Float):Point
-    return new Point(viewX + (lx + symOffsetX()) * zoom, viewY + (ly + symOffsetY()) * zoom);
+    return fullMatrix().transformPoint(new Point(lx, ly));
+
+  /**
+   * Screen pixels per drawing pixel (zoom times the camera's zoom).
+   */
+  function screenScale():Float
+  {
+    var m = fullMatrix();
+    return Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+  }
+
+  /**
+   * The stage's corners on screen.
+   */
+  function stageCorners():Array<Point>
+  {
+    var m = stageMatrix();
+    var w = doc.project.width, h = doc.project.height;
+    return [
+      m.transformPoint(new Point(0, 0)),
+      m.transformPoint(new Point(w, 0)),
+      m.transformPoint(new Point(w, h)),
+      m.transformPoint(new Point(0, h))
+    ];
+  }
 
   //
   // Frame update
@@ -1005,6 +1151,7 @@ class AnimatorState extends QOLEditorState
     timeline.redraw();
     updateLabels();
     updateDecor();
+    updateViewBar();
   }
 
   function updateLabels():Void
@@ -1033,9 +1180,20 @@ class AnimatorState extends QOLEditorState
     canvasRoot.scaleY = s.y;
     canvasRoot.x = camCanvas.flashSprite.x - camCanvas.width * 0.5 * s.x;
     canvasRoot.y = camCanvas.flashSprite.y - camCanvas.height * 0.5 * s.y;
-    stageHolder.x = viewX;
-    stageHolder.y = viewY;
-    stageHolder.scaleX = stageHolder.scaleY = zoom;
+    stageHolder.transform.matrix = stageMatrix();
+    var cam = viewCamera();
+    worldHolder.transform.matrix = cam ?? new Matrix();
+    worldHolder.mask = clipStage ? stageMask : null;
+    stageMask.visible = clipStage;
+    if (clipStage)
+    {
+      var mg = stageMask.graphics;
+      mg.clear();
+      mg.beginFill(0xFFFFFF, 1);
+      mg.drawRect(0, 0, doc.project.width, doc.project.height);
+      mg.endFill();
+    }
+    drawCameraFrame();
     drawStageDecor();
 
     if (renderDirty)
@@ -1120,23 +1278,76 @@ class AnimatorState extends QOLEditorState
 
   function drawStageDecor():Void
   {
-    var x = viewX, y = viewY, w = doc.project.width * zoom, h = doc.project.height * zoom;
-    var key = '$x,$y,$w,$h,$playing';
+    var c = stageCorners();
+    var key = [for (p in c) '${Math.round(p.x * 10)},${Math.round(p.y * 10)}'].join(';') + '$playing,${AnimatorSkin.version}';
     if (key == decorKey) return;
     decorKey = key;
     var g = stageDecor.graphics;
     g.clear();
+    inline function poly(ox:Float, oy:Float, grow:Float)
+    {
+      // Grow the quad outward from its middle.
+      var mx = (c[0].x + c[2].x) / 2, my = (c[0].y + c[2].y) / 2;
+      for (i in 0...5)
+      {
+        var p = c[i % 4];
+        var dx = p.x - mx, dy = p.y - my;
+        var len = Math.sqrt(dx * dx + dy * dy);
+        var k = len == 0 ? 0 : grow / len * 1.41;
+        var px = p.x + dx * k + ox, py = p.y + dy * k + oy;
+        if (i == 0) g.moveTo(px, py);
+        else
+          g.lineTo(px, py);
+      }
+    }
     for (i in 0...6)
     {
-      var grow = 2 + i * 3;
       g.beginFill(0x07040F, 0.09);
-      g.drawRoundRect(x - grow + 5, y - grow + 9, w + grow * 2, h + grow * 2, grow * 2 + 4, grow * 2 + 4);
+      poly(5, 9, 2 + i * 3);
       g.endFill();
     }
     g.lineStyle(5, AnimatorSkin.ACCENT & 0xFFFFFF, playing ? 0.32 : 0.16);
-    g.drawRect(x - 3.5, y - 3.5, w + 7, h + 7);
+    poly(0, 0, 3.5);
     g.lineStyle(1.5, 0xFFFFFF, 0.5);
-    g.drawRect(x - 1, y - 1, w + 2, h + 2);
+    poly(0, 0, 1);
+    g.lineStyle();
+  }
+
+  /**
+   * The camera's view as a frame: shown when looking past the camera, or while the camera layer is selected.
+   */
+  function drawCameraFrame():Void
+  {
+    var g = camFrame.graphics;
+    g.clear();
+    if (editPath.length > 0) return;
+    var cam = renderer.cameraAt(sym, frame);
+    if (cam == null) return;
+    var layer = currentLayer();
+    var selected = layer != null && layer.kind == 'camera';
+    if (cameraView && !selected) return;
+    // The stage rectangle, taken back into world coordinates.
+    var inv = renderer.matrixOf(cam);
+    inv.invert();
+    var w = doc.project.width, h = doc.project.height;
+    var corners:Array<Array<Float>> = [[0, 0], [w, 0], [w, h], [0, h]];
+    var pts = [for (p in corners) inv.transformPoint(new Point(p[0], p[1]))];
+    var lw = 2 / Math.max(0.01, screenScale());
+    g.lineStyle(lw * 2, 0x000000, 0.35);
+    g.moveTo(pts[0].x, pts[0].y);
+    for (i in 1...5)
+      g.lineTo(pts[i % 4].x, pts[i % 4].y);
+    g.lineStyle(lw, AnimatorSkin.YELLOW & 0xFFFFFF, 1);
+    g.moveTo(pts[0].x, pts[0].y);
+    for (i in 1...5)
+      g.lineTo(pts[i % 4].x, pts[i % 4].y);
+    // Crosshair in the middle.
+    var cx = (pts[0].x + pts[2].x) / 2, cy = (pts[0].y + pts[2].y) / 2;
+    var arm = 14 / Math.max(0.01, screenScale());
+    g.moveTo(cx - arm, cy);
+    g.lineTo(cx + arm, cy);
+    g.moveTo(cx, cy - arm);
+    g.lineTo(cx, cy + arm);
     g.lineStyle();
   }
 
@@ -1180,9 +1391,17 @@ class AnimatorState extends QOLEditorState
   {
     var p = doc.project;
     var label = editPath.length == 0 ? '${p.name}  \u00B7  ${p.width} x ${p.height}  \u00B7  ${p.fps} fps' : 'Editing symbol: ${sym.name}';
-    decor.setStageTag(viewX, viewY, label, workLeft + 8, QOLEditorState.MENUBAR_HEIGHT + 6, workRight - 8);
-    var cx = Math.max(workLeft + 200, Math.min(workRight - 200, viewX + p.width * zoom / 2));
-    var cy = Math.max(QOLEditorState.MENUBAR_HEIGHT + 90, Math.min(workBottom - 60, viewY + p.height * zoom / 2));
+    var corners = stageCorners();
+    var minX = corners[0].x, minY = corners[0].y;
+    for (c in corners)
+    {
+      if (c.x < minX) minX = c.x;
+      if (c.y < minY) minY = c.y;
+    }
+    decor.setStageTag(minX, minY, label, workLeft + 8, QOLEditorState.MENUBAR_HEIGHT + 6, workRight - 8);
+    var mid = stageMatrix().transformPoint(new Point(p.width / 2, p.height / 2));
+    var cx = Math.max(workLeft + 200, Math.min(workRight - 200, mid.x));
+    var cy = Math.max(QOLEditorState.MENUBAR_HEIGHT + 90, Math.min(workBottom - 60, mid.y));
     decor.setHint(canvasEmpty && !playing && !FlxG.mouse.pressed && editPath.length == 0, cx, cy);
   }
 
@@ -1211,10 +1430,12 @@ class AnimatorState extends QOLEditorState
     var b = selectionBounds();
     if (b != null && tool == 'select')
     {
-      var p0 = toScreen(b.x, b.y), p1 = toScreen(b.right, b.bottom);
+      var hs = screenHandles(b);
       g.lineStyle(1, 0x5CE1FF, 1);
-      g.drawRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
-      for (h in handlePoints(p0.x, p0.y, p1.x, p1.y))
+      g.moveTo(hs[0].x, hs[0].y);
+      for (i in [2, 4, 6, 0])
+        g.lineTo(hs[i].x, hs[i].y);
+      for (h in hs)
       {
         g.beginFill(0xFFFFFF, 1);
         g.drawRect(h.x - 4, h.y - 4, 8, 8);
@@ -1234,7 +1455,7 @@ class AnimatorState extends QOLEditorState
     // Brush cursor.
     if (overCanvas && (tool == 'brush' || tool == 'eraser' || tool == 'pencil'))
     {
-      var size = toolSize() * zoom;
+      var size = toolSize() * screenScale();
       var paintColor = tool == 'pencil' ? strokeColor : fillColor;
       if (tool != 'eraser' && size > 6)
       {
@@ -1266,6 +1487,12 @@ class AnimatorState extends QOLEditorState
       default: 1;
     }
   }
+
+  /**
+   * The 8 transform handles of a selection box (local coordinates), on screen.
+   */
+  function screenHandles(b:Rectangle):Array<Point>
+    return [for (p in handlePoints(b.x, b.y, b.right, b.bottom)) toScreen(p.x, p.y)];
 
   static function handlePoints(x0:Float, y0:Float, x1:Float, y1:Float):Array<Point>
   {
@@ -1347,7 +1574,10 @@ class AnimatorState extends QOLEditorState
     // Zoom & scroll.
     if (FlxG.mouse.wheel != 0 && drag == '')
     {
-      if (ctrl() || FlxG.keys.pressed.ALT) zoomAt(FlxG.mouse.wheel > 0 ? 1.15 : 1 / 1.15, mx, my);
+      var camLayer = currentLayer()?.kind == 'camera';
+      if (ctrl() && FlxG.keys.pressed.SHIFT) rotateView(FlxG.mouse.wheel > 0 ? 15 : -15);
+      else if (camLayer && !ctrl() && !FlxG.keys.pressed.ALT) zoomCamera(FlxG.mouse.wheel > 0 ? 1.1 : 1 / 1.1);
+      else if (ctrl() || FlxG.keys.pressed.ALT) zoomAt(FlxG.mouse.wheel > 0 ? 1.15 : 1 / 1.15, mx, my);
       else if (FlxG.keys.pressed.SHIFT) viewX += FlxG.mouse.wheel * 40;
       else
         viewY += FlxG.mouse.wheel * 40;
@@ -1398,6 +1628,11 @@ class AnimatorState extends QOLEditorState
       setStatus('This layer is hidden.');
       return null;
     }
+    if (layer.kind == 'camera' || layer.kind == 'audio')
+    {
+      setStatus(layer.kind == 'camera' ? 'That\'s the camera layer: drag on the stage to move the camera, or pick another layer to draw on.' : 'Sound layers hold sounds, not drawings.');
+      return null;
+    }
     var key = AnimData.keyAt(layer, frame);
     if (key == null)
     {
@@ -1440,6 +1675,11 @@ class AnimatorState extends QOLEditorState
     var layer = currentLayer();
     var isBitmap = layer != null && layer.kind == 'bitmap';
     stop();
+    if (layer != null && layer.kind == 'camera' && tool != 'hand' && tool != 'zoom')
+    {
+      beginCameraDrag(mx, my);
+      return;
+    }
 
     switch (tool)
     {
@@ -1495,7 +1735,8 @@ class AnimatorState extends QOLEditorState
         lastPaint = local;
       case 'stroke':
         var last = points[points.length - 1];
-        if ((last.x - local.x) * (last.x - local.x) + (last.y - local.y) * (last.y - local.y) >= 1 / (zoom * zoom))
+        var sc = screenScale();
+        if ((last.x - local.x) * (last.x - local.x) + (last.y - local.y) * (last.y - local.y) >= 1 / (sc * sc))
         {
           points.push({x: local.x, y: local.y, w: 1});
           drawLiveStroke();
@@ -1504,6 +1745,8 @@ class AnimatorState extends QOLEditorState
         eraseVectorAt(local);
       case 'shape':
         drawLiveShape(toLocal(cDragX, cDragY), local);
+      case 'campan' | 'camrotate':
+        cameraDrag(mx, my);
       default:
     }
   }
@@ -1528,10 +1771,371 @@ class AnimatorState extends QOLEditorState
         doc.changed();
       case 'shape':
         finishShape(toLocal(cDragX, cDragY), local);
+      case 'campan' | 'camrotate':
+        camKey = null;
+        if (cDragMoved) doc.changed();
+        else
+          doc.dropCheckpoint();
       default:
     }
     liveShape.graphics.clear();
     drag = '';
+  }
+
+  //
+  // Camera
+  //
+
+  var camKey:Null<AnimKeyframe> = null;
+  var camStart:Null<AnimCamera> = null;
+  var camGrab:Null<Point> = null;
+  var camAngle0:Float = 0;
+
+  /**
+   * The camera keyframe to change at the playhead (a tweened span gets a new keyframe here, like elements do).
+   */
+  function cameraKeyHere():Null<AnimKeyframe>
+  {
+    var layer = AnimData.cameraLayer(sym);
+    if (layer == null || editPath.length > 0) return null;
+    var cur = AnimData.copy(renderer.cameraAt(sym, frame) ?? AnimData.defaultCamera(doc.project));
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null || (key.start != frame && key.tween != null))
+    {
+      var made = splitKeyAt(layer, frame, []);
+      made.camera = cur;
+      return made;
+    }
+    if (key.camera == null) key.camera = cur;
+    return key;
+  }
+
+  function beginCameraDrag(mx:Float, my:Float):Void
+  {
+    if (editPath.length > 0) return;
+    doc.checkpoint();
+    camKey = cameraKeyHere();
+    if (camKey == null)
+    {
+      doc.dropCheckpoint();
+      return;
+    }
+    camStart = AnimData.copy(camKey.camera);
+    var inv = stageMatrix();
+    inv.invert();
+    var stagePt = inv.transformPoint(new Point(mx, my));
+    var camInv = renderer.matrixOf(camStart);
+    camInv.invert();
+    camGrab = cameraView ? camInv.transformPoint(stagePt) : stagePt;
+    var mid = stageMatrix().transformPoint(new Point(doc.project.width / 2, doc.project.height / 2));
+    camAngle0 = Math.atan2(my - mid.y, mx - mid.x);
+    drag = FlxG.keys.pressed.SHIFT ? 'camrotate' : 'campan';
+    renderDirty = true;
+  }
+
+  function cameraDrag(mx:Float, my:Float):Void
+  {
+    if (camKey == null || camStart == null || camGrab == null) return;
+    var cam = camKey.camera;
+    var inv = stageMatrix();
+    inv.invert();
+    var stagePt = inv.transformPoint(new Point(mx, my));
+    if (drag == 'camrotate')
+    {
+      var mid = stageMatrix().transformPoint(new Point(doc.project.width / 2, doc.project.height / 2));
+      var delta = (Math.atan2(my - mid.y, mx - mid.x) - camAngle0) * 180 / Math.PI;
+      if (FlxG.keys.pressed.CONTROL) delta = Math.round(delta / 15) * 15;
+      cam.rotation = camStart.rotation + (cameraView ? -delta : delta);
+    }
+    else if (cameraView)
+    {
+      // The picture follows the mouse: the camera moves the other way.
+      var w = doc.project.width, h = doc.project.height;
+      var dx = (stagePt.x - w / 2) / cam.zoom, dy = (stagePt.y - h / 2) / cam.zoom;
+      var r = cam.rotation * Math.PI / 180;
+      cam.x = camGrab.x - (dx * Math.cos(r) - dy * Math.sin(r));
+      cam.y = camGrab.y - (dx * Math.sin(r) + dy * Math.cos(r));
+    }
+    else
+    {
+      // Looking past the camera: its frame follows the mouse.
+      cam.x = camStart.x + stagePt.x - camGrab.x;
+      cam.y = camStart.y + stagePt.y - camGrab.y;
+    }
+    renderDirty = true;
+    dirty = true;
+    propsForm?.refresh();
+  }
+
+  function zoomCamera(factor:Float):Void
+  {
+    editCamera(c -> c.zoom = Math.max(0.05, Math.min(20, c.zoom * factor)));
+  }
+
+  /**
+   * Change the camera at the playhead (property edits made in one go undo together).
+   */
+  function editCamera(fn:AnimCamera->Void):Void
+  {
+    if (!editStarted)
+    {
+      doc.checkpoint();
+      editStarted = true;
+    }
+    var key = cameraKeyHere();
+    if (key == null) return;
+    fn(key.camera);
+    renderDirty = true;
+    dirty = true;
+    propsForm?.refresh();
+  }
+
+  /**
+   * Add the camera layer (or select it).
+   */
+  public function addCamera():Void
+  {
+    if (editPath.length > 0)
+    {
+      alert('Camera', 'The camera belongs to the main timeline: go back to the Scene to add it.');
+      return;
+    }
+    for (i in 0...sym.layers.length)
+    {
+      if (sym.layers[i].kind == 'camera')
+      {
+        selectLayer(i);
+        return;
+      }
+    }
+    doc.checkpoint();
+    var layer = AnimData.newLayer('Camera', 'camera', 3);
+    layer.color = 0xFFFFD84A;
+    layer.frames[0].duration = AnimData.symbolLength(sym);
+    layer.frames[0].camera = AnimData.defaultCamera(doc.project);
+    sym.layers.insert(0, layer);
+    curLayer = 0;
+    cameraView = true;
+    selection = [];
+    doc.changed();
+    notify('Camera added', 'Drag on the stage to move it, Shift + drag to turn it, the mouse wheel zooms it. Add keyframes and a tween to animate it.');
+  }
+
+  function buildCameraProps(form:QOLForm):Void
+  {
+    var cam = renderer.cameraAt(sym, frame) ?? AnimData.defaultCamera(doc.project);
+    form.section('Camera at frame ${frame + 1}');
+    form.number('X', () -> (renderer.cameraAt(sym, frame) ?? cam).x, v -> editCamera(c -> c.x = v), -100000, 100000, 1, 1);
+    form.number('Y', () -> (renderer.cameraAt(sym, frame) ?? cam).y, v -> editCamera(c -> c.y = v), -100000, 100000, 1, 1);
+    form.number('Zoom %', () -> (renderer.cameraAt(sym, frame) ?? cam).zoom * 100, v -> editCamera(c -> c.zoom = Math.max(0.05, v / 100)), 5, 2000, 5, 1);
+    form.number('Rotation', () -> (renderer.cameraAt(sym, frame) ?? cam).rotation, v -> editCamera(c -> c.rotation = v), -3600, 3600, 1, 1);
+    form.buttons([
+      {
+        text: 'Reset',
+        cb: () -> {
+          editStarted = false;
+          editCamera(c -> {
+            var d = AnimData.defaultCamera(doc.project);
+            c.x = d.x;
+            c.y = d.y;
+            c.zoom = d.zoom;
+            c.rotation = d.rotation;
+          });
+        }
+      }
+    ]);
+    form.check('Show the stage through the camera', () -> cameraView, v -> {
+      cameraView = v;
+      renderDirty = true;
+      updateViewBar();
+    });
+    form.note('Drag on the stage to move the camera, Shift + drag turns it, the mouse wheel zooms it. '
+      + 'Add keyframes (F6) with a tween to animate it. Exports show what the camera sees.');
+  }
+
+  //
+  // View bar (zoom, rotate, flip, fit, clip, camera, canvas color)
+  //
+
+  function buildViewBar():Void
+  {
+    viewBar = new HBox();
+    viewBar.styleString = 'spacing: 3px;';
+    function btn(icon:String, tip:String, cb:Void->Void):Button
+    {
+      var b = new Button();
+      b.icon = AnimatorSkin.icon(icon, 14, 0xFFFFFFFF, true);
+      b.tooltip = tip;
+      b.width = 28;
+      b.height = 24;
+      b.addClass('anim-icon-button');
+      b.onClick = _ -> cb();
+      viewBar.addComponent(b);
+      return b;
+    }
+    function textBtn(width:Int, tip:String, cb:Void->Void):Button
+    {
+      var b = new Button();
+      b.width = width;
+      b.height = 24;
+      b.tooltip = tip;
+      b.addClass('anim-icon-button');
+      b.onClick = _ -> cb();
+      viewBar.addComponent(b);
+      return b;
+    }
+    btn('zoom-out', 'Zoom out (Ctrl + wheel)', () -> zoomAt(1 / 1.25, centerX(), centerY()));
+    zoomLabel = textBtn(54, 'Zoom: click for 100%', () -> keepPointWhile(centerX(), centerY(), () -> zoom = 1));
+    btn('zoom-in', 'Zoom in (Ctrl + wheel)', () -> zoomAt(1.25, centerX(), centerY()));
+    btn('rotate-left', 'Turn the view left (Ctrl + Shift + wheel)', () -> rotateView(-15));
+    rotLabel = textBtn(46, 'View angle: click to straighten', () -> rotateView(0, true));
+    btn('rotate-right', 'Turn the view right (Ctrl + Shift + wheel)', () -> rotateView(15));
+    flipButton = btn('flip', 'Mirror the view (checks your drawing; doesn\'t change it)', () -> {
+      flipView();
+      updateViewBar();
+    });
+    btn('fit', 'Fit the stage in the window (Ctrl + 0)', () -> {
+      viewRotation = 0;
+      viewFlip = false;
+      fitView();
+      updateViewBar();
+    });
+    clipButton = btn('clip', 'Hide everything outside the stage', () -> {
+      clipStage = !clipStage;
+      renderDirty = true;
+      updateViewBar();
+    });
+    camViewButton = btn('camera', 'Camera: add one, or switch between the camera\'s view and the whole drawing', () -> {
+      if (AnimData.cameraLayer(sym) == null || editPath.length > 0) addCamera();
+      else
+        cameraView = !cameraView;
+      renderDirty = true;
+      decorKey = '';
+      propsForm?.refresh();
+      updateViewBar();
+    });
+    canvasButton = textBtn(84, 'Canvas color', openCanvasColorDialog);
+    canvasButton.text = 'Canvas';
+    root.addComponent(viewBar);
+    updateViewBar();
+  }
+
+  var viewBarState:String = '';
+
+  function updateViewBar():Void
+  {
+    if (viewBar == null) return;
+    var z = '${Math.round(zoom * 100)}%';
+    var r = '${Math.round(viewRotation)}\u00B0';
+    var hasCam = AnimData.cameraLayer(doc.main) != null;
+    var state = '$z|$r|$viewFlip|$clipStage|$cameraView|$hasCam|${doc.project.bg}';
+    if (state == viewBarState) return;
+    viewBarState = state;
+    zoomLabel.text = z;
+    rotLabel.text = r;
+    toggleClass(flipButton, viewFlip);
+    toggleClass(clipButton, clipStage);
+    toggleClass(camViewButton, hasCam && cameraView);
+    canvasButton.icon = canvasSwatch(doc.project.bg);
+  }
+
+  static function toggleClass(b:Button, on:Bool):Void
+  {
+    if (on) b.addClass('anim-on');
+    else
+      b.removeClass('anim-on');
+  }
+
+  static function canvasSwatch(bg:Int):flixel.graphics.frames.FlxFrame
+  {
+    var key = 'qol-anim-canvas-swatch-${StringTools.hex(bg, 8)}';
+    return QOLTheme.cached(key, () -> {
+      var b = new BitmapData(16, 16, true, 0);
+      if ((bg >>> 24) == 0)
+      {
+        b.fillRect(new Rectangle(1, 1, 14, 14), 0xFFFFFFFF);
+        b.fillRect(new Rectangle(1, 1, 7, 7), 0xFFC8C8D0);
+        b.fillRect(new Rectangle(8, 8, 7, 7), 0xFFC8C8D0);
+      }
+      else
+        b.fillRect(new Rectangle(1, 1, 14, 14), bg | 0xFF000000);
+      // Outline.
+      for (i in 0...16)
+      {
+        b.setPixel32(i, 0, 0xFF1A1030);
+        b.setPixel32(i, 15, 0xFF1A1030);
+        b.setPixel32(0, i, 0xFF1A1030);
+        b.setPixel32(15, i, 0xFF1A1030);
+      }
+      return b;
+    }).imageFrame.frame;
+  }
+
+  public static final CANVAS_PRESETS:Array<{name:String, color:Int}> = [
+    {name: 'Transparent', color: 0x00FFFFFF},
+    {name: 'White', color: 0xFFFFFFFF},
+    {name: 'Paper', color: 0xFFF4EBDD},
+    {name: 'Light gray', color: 0xFFC8C8CC},
+    {name: 'Dark', color: 0xFF26232E},
+    {name: 'Black', color: 0xFF000000},
+    {name: 'Green screen', color: 0xFF00B140},
+    {name: 'Blue screen', color: 0xFF0047BB},
+    {name: 'Sky', color: 0xFF8FD3FF},
+    {name: 'Week 1 stage', color: 0xFF2A2440}
+  ];
+
+  function setCanvasColor(c:Int):Void
+  {
+    if (c == doc.project.bg) return;
+    doc.checkpoint();
+    doc.project.bg = c;
+    renderDirty = true;
+    dirty = true;
+    docForm.refresh();
+    updateViewBar();
+  }
+
+  function openCanvasColorDialog():Void
+  {
+    var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
+    dialog.title = 'Canvas Color';
+    dialog.buttons = DialogButton.OK;
+    dialog.destroyOnClose = true;
+    var box = new VBox();
+    box.styleString = 'spacing: 8px;';
+    var grid = new VBox();
+    grid.styleString = 'spacing: 4px;';
+    var row:Null<HBox> = null;
+    var form = new QOLForm(110, 150);
+    for (i in 0...CANVAS_PRESETS.length)
+    {
+      var p = CANVAS_PRESETS[i];
+      if (i % 2 == 0)
+      {
+        row = new HBox();
+        row.styleString = 'spacing: 4px;';
+        grid.addComponent(row);
+      }
+      var b = new Button();
+      b.text = p.name;
+      b.icon = canvasSwatch(p.color);
+      b.width = 150;
+      b.height = 26;
+      b.styleString = 'text-align: left;';
+      b.onClick = _ -> {
+        setCanvasColor(p.color);
+        form.refresh();
+      };
+      row.addComponent(b);
+    }
+    box.addComponent(grid);
+    form.section('Any color');
+    form.colorField('Color', () -> doc.project.bg | 0xFF000000, v -> setCanvasColor((v & 0xFFFFFF) | 0xFF000000));
+    form.check('Transparent', () -> (doc.project.bg >>> 24) == 0, v -> setCanvasColor(v ? (doc.project.bg & 0xFFFFFF) : (doc.project.bg | 0xFF000000)));
+    form.note('The canvas color is saved with the animation and used by exports (transparent keeps exports see-through).');
+    box.addComponent(form);
+    dialog.addComponent(box);
+    dialog.showDialog(true);
   }
 
   //
@@ -1544,8 +2148,7 @@ class AnimatorState extends QOLEditorState
     var b = selectionBounds();
     if (b != null)
     {
-      var p0 = toScreen(b.x, b.y), p1 = toScreen(b.right, b.bottom);
-      var hs = handlePoints(p0.x, p0.y, p1.x, p1.y);
+      var hs = screenHandles(b);
       for (i in 0...hs.length)
       {
         if (Math.abs(mx - hs[i].x) <= 6 && Math.abs(my - hs[i].y) <= 6)
@@ -1558,7 +2161,7 @@ class AnimatorState extends QOLEditorState
       for (i in [0, 2, 4, 6])
       {
         var d = Math.sqrt((mx - hs[i].x) * (mx - hs[i].x) + (my - hs[i].y) * (my - hs[i].y));
-        if (d > 6 && d < 22 && (mx < p0.x || mx > p1.x || my < p0.y || my > p1.y))
+        if (d > 6 && d < 22 && !b.contains(local.x, local.y))
         {
           beginTransform('rotate', b, i);
           return;
@@ -1835,9 +2438,49 @@ class AnimatorState extends QOLEditorState
   // Drawing
   //
 
+  static inline final MAX_CANVAS:Int = 8192;
+
+  var warnedCanvasSize:Bool = false;
+
+  /**
+   * Paint layers grow when you draw past their edge (so you can draw outside the stage).
+   */
+  function growCanvasFor(a:Point, b:Point, r:Float):Void
+  {
+    if (paintBitmap == null || paintKey == null) return;
+    var bx = paintKey.bx ?? 0, by = paintKey.by ?? 0;
+    var minX = Math.min(a.x, b.x) - r - bx, minY = Math.min(a.y, b.y) - r - by;
+    var maxX = Math.max(a.x, b.x) + r - bx, maxY = Math.max(a.y, b.y) + r - by;
+    var w = paintBitmap.width, h = paintBitmap.height;
+    if (minX >= 0 && minY >= 0 && maxX <= w && maxY <= h) return;
+    var pad = 256;
+    var x0 = minX < 0 ? Math.floor(minX) - pad : 0.0;
+    var y0 = minY < 0 ? Math.floor(minY) - pad : 0.0;
+    var x1 = maxX > w ? Math.ceil(maxX) + pad : w;
+    var y1 = maxY > h ? Math.ceil(maxY) + pad : h;
+    var nw = Std.int(x1 - x0), nh = Std.int(y1 - y0);
+    if (nw > MAX_CANVAS || nh > MAX_CANVAS)
+    {
+      if (!warnedCanvasSize) setStatus('This paint layer is as big as it can get ($MAX_CANVAS px).');
+      warnedCanvasSize = true;
+      return;
+    }
+    var grown = new BitmapData(nw, nh, true, 0);
+    grown.copyPixels(paintBitmap, paintBitmap.rect, new Point(-x0, -y0));
+    // The old canvas was this stroke's own copy (see editableBitmap), so nothing else uses it.
+    var old = paintBitmap;
+    doc.replaceBitmap(paintKey.bitmap, grown);
+    old.dispose();
+    paintKey.bx = bx + x0;
+    paintKey.by = by + y0;
+    paintBitmap = grown;
+    renderDirty = true;
+  }
+
   function paintDab(from:Point, to:Point, first:Bool):Void
   {
     if (paintBitmap == null) return;
+    if (tool != 'eraser') growCanvasFor(from, to, toolSize() / 2 + 2);
     from = canvasPoint(from);
     to = canvasPoint(to);
     // Bitmap canvases sit at the symbol's origin.
@@ -1879,7 +2522,7 @@ class AnimatorState extends QOLEditorState
       points = [];
       return;
     }
-    var pts = AnimGeom.thin(points, 1.2 / zoom);
+    var pts = AnimGeom.thin(points, 1.2 / screenScale());
     pts = AnimGeom.smooth(pts, smoothing);
     var path:AnimPath;
     if (tool == 'brush')
@@ -2019,7 +2662,13 @@ class AnimatorState extends QOLEditorState
     var path = shapeDef(a, b);
     if (currentLayer().kind == 'bitmap')
     {
-      var bmp = doc.editableBitmap(key);
+      paintKey = key;
+      paintBitmap = doc.editableBitmap(key);
+      var pb = AnimGeom.pathBounds(path);
+      growCanvasFor(new Point(pb.x, pb.y), new Point(pb.right, pb.bottom), (path.width ?? 0) + 2);
+      var bmp = paintBitmap;
+      paintKey = null;
+      paintBitmap = null;
       var s = new Shape();
       AnimGeom.drawPath(s.graphics, path);
       s.x = -(key.bx ?? 0);
@@ -2728,6 +3377,7 @@ class AnimatorState extends QOLEditorState
   {
     var layer = currentLayer();
     if (layer == null) return;
+    var camNow = layer.kind == 'camera' ? AnimData.copy(renderer.cameraAt(sym, frame) ?? AnimData.defaultCamera(doc.project)) : null;
     doc.checkpoint();
     var key = AnimData.keyAt(layer, frame);
     var src = key ?? layer.frames[layer.frames.length - 1];
@@ -2766,6 +3416,7 @@ class AnimatorState extends QOLEditorState
       if (src.by != null) made.by = src.by;
       if (blank && made.bx == null) setCanvasPos(made);
     }
+    if (camNow != null) made.camera = blank ? AnimData.defaultCamera(doc.project) : camNow;
     doc.changed();
   }
 
@@ -2983,7 +3634,11 @@ class AnimatorState extends QOLEditorState
     var layer = currentLayer();
     var key = layer != null ? AnimData.keyAt(layer, frame) : null;
 
-    if (selection.length > 0 && tool == 'select')
+    if (layer != null && layer.kind == 'camera')
+    {
+      buildCameraProps(form);
+    }
+    else if (selection.length > 0 && tool == 'select')
     {
       buildElementProps(form);
     }

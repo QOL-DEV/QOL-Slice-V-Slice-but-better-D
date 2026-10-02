@@ -55,7 +55,8 @@ typedef AnimLayer =
   var name:String;
 
   /**
-   * 'vector' (shapes, symbols and placed bitmaps) or 'bitmap' (a paintable canvas per keyframe).
+   * 'vector' (shapes, symbols and placed bitmaps), 'bitmap' (a paintable canvas per keyframe), 'camera' (the main
+   * timeline's camera) or 'audio' (sounds).
    */
   var kind:String;
 
@@ -102,6 +103,34 @@ typedef AnimKeyframe =
   var ?tween:AnimTween;
 
   var ?label:String;
+
+  /**
+   * Camera layers: where the camera looks at this keyframe.
+   */
+  var ?camera:AnimCamera;
+}
+
+/**
+ * An Animate-style camera: the stage shows what the camera sees.
+ */
+typedef AnimCamera =
+{
+  /**
+   * The point (in stage coordinates) at the middle of the camera's view.
+   */
+  var x:Float;
+
+  var y:Float;
+
+  /**
+   * 1 = 100%.
+   */
+  var zoom:Float;
+
+  /**
+   * Degrees, clockwise.
+   */
+  var rotation:Float;
 }
 
 typedef AnimTween =
@@ -269,6 +298,21 @@ class AnimData
       tx: 0,
       ty: 0
     };
+  }
+
+  public static function defaultCamera(project:AnimProject):AnimCamera
+    return {
+      x: project.width / 2,
+      y: project.height / 2,
+      zoom: 1,
+      rotation: 0
+    };
+
+  public static function cameraLayer(sym:AnimSymbol):Null<AnimLayer>
+  {
+    for (l in sym.layers)
+      if (l.kind == 'camera') return l;
+    return null;
   }
 
   /**

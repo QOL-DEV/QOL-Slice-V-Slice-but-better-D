@@ -401,7 +401,8 @@ class PSDFile
       layers: [copy]
     };
     var bmp = new BitmapData(w, h, true, 0);
-    var spr = new AnimRender(doc).render(temp, frame, {forExport: true});
+    var r = new AnimRender(doc);
+    var spr = r.render(temp, frame, {forExport: true, camera: sym == doc.main ? r.cameraMatrix(sym, frame) : null});
     var m = new Matrix();
     if (sym != doc.main) m.translate(w / 2, h / 2);
     bmp.draw(spr, m, null, null, null, true);
@@ -426,7 +427,7 @@ class PSDFile
   }
 
   static function exportLayers(sym:AnimSymbol):Array<Int>
-    return [for (i in 0...sym.layers.length) if (sym.layers[i].guide != true && sym.layers[i].kind != 'audio') i];
+    return [for (i in 0...sym.layers.length) if (sym.layers[i].guide != true && sym.layers[i].kind != 'audio' && sym.layers[i].kind != 'camera') i];
 
   static function layerAt(doc:AnimDoc, sym:AnimSymbol, li:Int, frame:Int):{layer:PSDWriteLayer, hash:String}
   {

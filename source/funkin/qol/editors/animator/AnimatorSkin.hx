@@ -724,6 +724,41 @@ class AnimatorSkin
         }
         g.lineStyle();
         rect(10.6, 3, 2.8, 18, 1, 0.5);
+      case 'zoom-in' | 'zoom-out':
+        ring(10, 10, 6.4, 2.6);
+        line(14.6, 14.6, 20.4, 20.4, 3.4);
+        rect(6.8, 9, 6.4, 2, 0.6);
+        if (name == 'zoom-in') rect(9, 6.8, 2, 6.4, 0.6);
+      case 'rotate-left' | 'rotate-right':
+        var left = name == 'rotate-left';
+        arc(12, 13, 7, left ? 200 : -20, left ? 470 : 250, 2.6);
+        if (left) poly([3.2, 6, 9.6, 6.4, 5.4, 11.6]);
+        else
+          poly([20.8, 6, 14.4, 6.4, 18.6, 11.6]);
+      case 'flip':
+        poly([10.5, 4, 10.5, 20, 2.5, 20]);
+        poly([13.5, 4, 13.5, 20, 21.5, 20], 0.5);
+        rect(11.2, 2, 1.6, 20, 0.6);
+      case 'fit':
+        g.lineStyle(2.4 * s, c, a);
+        for (q in [[3.0, 8.0, 3.0, 3.0, 8.0, 3.0], [16.0, 3.0, 21.0, 3.0, 21.0, 8.0], [21.0, 16.0, 21.0, 21.0, 16.0, 21.0], [8.0, 21.0, 3.0, 21.0, 3.0, 16.0]])
+        {
+          g.moveTo(q[0] * s, q[1] * s);
+          g.lineTo(q[2] * s, q[3] * s);
+          g.lineTo(q[4] * s, q[5] * s);
+        }
+        g.lineStyle();
+        rect(8, 8, 8, 8, 1.5);
+      case 'clip':
+        g.lineStyle(2 * s, c, a * 0.55);
+        g.drawRect(2.5 * s, 2.5 * s, 19 * s, 19 * s);
+        g.lineStyle();
+        rect(6.5, 6.5, 11, 11, 1.5);
+      case 'camera':
+        rect(2.5, 7, 13.5, 11, 2.4);
+        poly([16.5, 10.6, 21.8, 7.4, 21.8, 17.6, 16.5, 14.4]);
+        circle(6.5, 4.6, 2.6);
+        circle(12, 4.6, 2.6);
       case 'palette':
         g.beginFill(c, a);
         g.moveTo(12 * s, 2.5 * s);

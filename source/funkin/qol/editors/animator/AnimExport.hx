@@ -570,7 +570,7 @@ class AnimExport
         layers: [sym.layers[onlyLayer]]
       };
     }
-    var spr = renderer.render(target, frame, {forExport: true});
+    var spr = renderer.render(target, frame, {forExport: true, camera: sym == doc.main ? renderer.cameraMatrix(sym, frame) : null});
     var m = new Matrix();
     m.translate(ox, oy);
     bmp.draw(spr, m, null, null, null, true);
