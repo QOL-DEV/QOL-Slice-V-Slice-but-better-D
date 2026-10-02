@@ -97,6 +97,15 @@ class QOLSlice
       var r = ~/[?&]qol=([A-Za-z0-9_\-]+)/;
       if (!r.match(search)) return false;
       var tool = r.matched(1);
+      // Dev: `&fit=1` makes the game fill the browser window like a resized/maximized desktop window (tests layouts and
+      // previews at window scales other than 1280x720).
+      if (~/[?&]fit=1/.match(search))
+      {
+        var backend:Dynamic = @:privateAccess lime.app.Application.current.window.__backend;
+        backend.resizeElement = true;
+        backend.cacheElementWidth = -1;
+        js.Browser.window.dispatchEvent(new js.html.Event('resize'));
+      }
       var modR = ~/[?&]mod=([A-Za-z0-9_\-]+)/;
       if (modR.match(search))
       {

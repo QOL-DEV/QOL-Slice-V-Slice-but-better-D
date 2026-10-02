@@ -92,7 +92,7 @@ class QOLTheme
   /**
    * Draws a rounded rectangle into a new bitmap.
    */
-  static function drawRound(width:Int, height:Int, color:FlxColor, radius:Float, ?borderColor:FlxColor, borderThickness:Float = 2):BitmapData
+  public static function drawRound(width:Int, height:Int, color:FlxColor, radius:Float, ?borderColor:FlxColor, borderThickness:Float = 2):BitmapData
   {
     var shape = new Shape();
     var g = shape.graphics;
@@ -112,6 +112,26 @@ class QOLTheme
       g.drawRoundRect(0, 0, width, height, radius * 2, radius * 2);
       g.endFill();
     }
+    var bmp = new BitmapData(width, height, true, 0);
+    bmp.draw(shape, null, null, null, null, true);
+    return bmp;
+  }
+
+  /**
+   * A rounded outline (the border is drawn as a line, so a see-through fill stays see-through).
+   */
+  public static function drawOutline(width:Int, height:Int, fill:FlxColor, radius:Float, border:FlxColor, thickness:Float = 2):BitmapData
+  {
+    var shape = new Shape();
+    var g = shape.graphics;
+    if (fill.alpha > 0)
+    {
+      g.beginFill(fill.rgb, fill.alphaFloat);
+      g.drawRoundRect(thickness, thickness, width - thickness * 2, height - thickness * 2, (radius - thickness) * 2, (radius - thickness) * 2);
+      g.endFill();
+    }
+    g.lineStyle(thickness, border.rgb, border.alphaFloat);
+    g.drawRoundRect(thickness / 2, thickness / 2, width - thickness, height - thickness, radius * 2, radius * 2);
     var bmp = new BitmapData(width, height, true, 0);
     bmp.draw(shape, null, null, null, null, true);
     return bmp;

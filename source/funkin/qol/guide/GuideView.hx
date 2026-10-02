@@ -56,7 +56,7 @@ class GuideView extends HBox
     };
     left.addComponent(list);
 
-    scroll = new ScrollView();
+    scroll = new funkin.qol.ui.QOLScrollView();
     scroll.width = width - 250;
     scroll.height = height;
     scroll.horizontalScrollPolicy = 'never';

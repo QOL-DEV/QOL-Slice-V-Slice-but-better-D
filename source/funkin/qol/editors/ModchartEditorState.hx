@@ -251,7 +251,7 @@ class ModchartEditorState extends QOLEditorState
     inspPage.text = 'Inspector';
     inspPage.styleString = 'padding: 6px;';
     tabs.addComponent(inspPage);
-    var scroll = new haxe.ui.containers.ScrollView();
+    var scroll = new funkin.qol.ui.QOLScrollView();
     scroll.width = tabs.width - 16;
     scroll.height = tabs.height - 44;
     scroll.horizontalScrollPolicy = 'never';

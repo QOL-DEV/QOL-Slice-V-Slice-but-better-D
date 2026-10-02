@@ -26,6 +26,29 @@ class QOLDialogs
     return top() != null;
 
   /**
+   * Close any open dropdown list / color picker popup. Returns true if one was open.
+   */
+  public static function closePopups():Bool
+  {
+    var closed = false;
+    @:privateAccess
+    for (root in Screen.instance.rootComponents.copy())
+    {
+      var drops:Array<haxe.ui.components.DropDown> = root.findComponents(null, haxe.ui.components.DropDown, -1);
+      if (Std.isOfType(root, haxe.ui.components.DropDown)) drops.push(cast root);
+      for (d in drops)
+      {
+        if (d.dropDownOpen)
+        {
+          d.hideDropDown();
+          closed = true;
+        }
+      }
+    }
+    return closed;
+  }
+
+  /**
    * Close the top dialog as if Cancel was pressed. Returns true if one was closed.
    */
   public static function closeTop():Bool

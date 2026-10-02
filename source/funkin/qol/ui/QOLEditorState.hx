@@ -88,6 +88,9 @@ class QOLEditorState extends UIState
 
   public function new()
   {
+    // Like every V-Slice state: pick up a window resize from the previous screen so the editor lays itself out for
+    // the window's real size.
+    if (funkin.ui.FullScreenScaleMode.instance != null) funkin.ui.FullScreenScaleMode.instance.onMeasurePostAwait();
     super();
   }
 
@@ -170,7 +173,7 @@ class QOLEditorState extends UIState
 
   function makePanel(x:Float, width:Int):VBox
   {
-    var scroll = new ScrollView();
+    var scroll = new QOLScrollView();
     scroll.left = x;
     scroll.top = MENUBAR_HEIGHT;
     scroll.width = width;
@@ -469,8 +472,16 @@ class QOLEditorState extends UIState
   {
     super.update(elapsed);
 
+    // Keep the checkerboard filling the whole view at any zoom (it's a backdrop, so its squares stay the same size).
+    if (gridBG != null && gridBG.visible && gridBG.scrollFactor.x == 0)
+    {
+      var z = camWorld.zoom > 0.01 ? camWorld.zoom : 1;
+      gridBG.scale.set(1 / z, 1 / z);
+      gridBG.setPosition(-FlxG.width / 2, -FlxG.height / 2);
+    }
+
     // Escape closes the top dialog first (and nothing else that frame).
-    if (FlxG.keys.justPressed.ESCAPE && QOLDialogs.closeTop()) return;
+    if (FlxG.keys.justPressed.ESCAPE && (QOLDialogs.closePopups() || QOLDialogs.closeTop())) return;
 
     if (!isTyping && !dialogOpen)
     {

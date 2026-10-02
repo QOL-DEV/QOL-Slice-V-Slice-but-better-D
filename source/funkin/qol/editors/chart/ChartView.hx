@@ -81,6 +81,7 @@ class ChartView extends FlxGroup
   var measureTexts:Array<FlxText> = [];
   var noteSprites:Array<FlxSprite> = [];
   var holdSprites:Array<FlxSprite> = [];
+  var selectGlows:Array<FlxSprite> = [];
   var kindLabels:Array<FlxText> = [];
   var eventSprites:Array<FlxSprite> = [];
   var eventLabels:Array<FlxText> = [];
@@ -422,6 +423,7 @@ class ChartView extends FlxGroup
     var noteIndex = 0;
     var holdIndex = 0;
     var kindIndex = 0;
+    var glowIndex = 0;
     var start = model.firstNoteIndexAt(tStart);
     var dragOffsetMs = 0.0;
     for (i in start...notes.length)
@@ -460,8 +462,21 @@ class ChartView extends FlxGroup
       spr.setGraphicSize(Std.int(laneWidth - 4), Std.int(laneWidth - 4));
       spr.updateHitbox();
       spr.setPosition(laneX(lane) + 2, ny - (laneWidth - 4) / 2);
-      spr.color = selected ? 0xFF7FF4FF : FlxColor.WHITE;
+      // Selected notes keep their colors and get an outline (tinting would turn red notes dark).
+      spr.color = FlxColor.WHITE;
       spr.alpha = (ny < top) ? 0.3 : 1;
+      if (selected)
+      {
+        var glow = getPooled(selectGlows, glowIndex++, () -> new FlxSprite());
+        var size = Std.int(laneWidth);
+        var key = 'qol-chart-sel3-$size';
+        if (glow.graphic == null || glow.graphic.key != key)
+        {
+          glow.loadGraphic(QOLTheme.cached(key, () -> QOLTheme.drawOutline(size, size, 0x00000000, Math.max(4, size * 0.22), 0xFF8CF6FF, 3)));
+          glow.antialiasing = true;
+        }
+        glow.setPosition(laneX(lane), ny - size / 2);
+      }
       if (n.kind != null && n.kind != '')
       {
         var label = getPooled(kindLabels, kindIndex++, () -> {
@@ -506,10 +521,19 @@ class ChartView extends FlxGroup
       spr.setGraphicSize(size, size);
       spr.updateHitbox();
       spr.setPosition(ox + 6 + stackX * 8, ey - size / 2);
-      spr.color = selected ? 0xFF7FF4FF : FlxColor.WHITE;
+      spr.color = FlxColor.WHITE;
       spr.alpha = (ey < top) ? 0.3 : 1;
       if (selected)
       {
+        var glow = getPooled(selectGlows, glowIndex++, () -> new FlxSprite());
+        var gs = size + 6;
+        var key = 'qol-chart-sel3-$gs';
+        if (glow.graphic == null || glow.graphic.key != key)
+        {
+          glow.loadGraphic(QOLTheme.cached(key, () -> QOLTheme.drawOutline(gs, gs, 0x00000000, Math.max(4, gs * 0.22), 0xFF8CF6FF, 3)));
+          glow.antialiasing = true;
+        }
+        glow.setPosition(spr.x - 3, spr.y - 3);
         var label = getPooled(eventLabels, evLabelIndex++, () -> QOLTheme.outlinedText(0, 0, 0, '', 11, FlxColor.WHITE, 1.5));
         var title = funkin.data.event.SongEventRegistry.getEvent(e.eventKind)?.getTitle() ?? e.eventKind;
         if (label.text != title) label.text = title;
@@ -518,6 +542,7 @@ class ChartView extends FlxGroup
     }
     hideRest(eventSprites, evIndex);
     hideRest(eventLabels, evLabelIndex);
+    hideRest(selectGlows, glowIndex);
 
     // Ghost note.
     ghost.visible = ghostLane >= 0;

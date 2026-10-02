@@ -743,6 +743,7 @@ class CharacterEditorState extends QOLEditorState
         insert(members.indexOf(camMarker), char);
         updatePrefixes();
         if (keepAnim != null && findAnim(keepAnim) != null) char.playAnimation(keepAnim, true);
+        updateAnimWarning();
       }
     }
     catch (e)
@@ -914,6 +915,8 @@ class CharacterEditorState extends QOLEditorState
     if (animList.selectedIndex != selectedAnim) animList.selectedIndex = selectedAnim;
     animForm.refresh();
     if (play) playCurrent(true);
+    else
+      updateAnimWarning();
   }
 
   function playCurrent(restart:Bool)
@@ -923,6 +926,66 @@ class CharacterEditorState extends QOLEditorState
     paused = false;
     char.canPlayOtherAnims = true;
     char.playAnimation(a.name, restart);
+    updateAnimWarning();
+  }
+
+  var animWarningShown:Bool = false;
+
+  /**
+   * Animations whose prefix matches no frame in the spritesheet. (Flixel would quietly show the sheet's first frame,
+   * which looks like a random pose.)
+   */
+  function brokenAnims():Array<String>
+  {
+    var broken:Array<String> = [];
+    if (char == null || char.isAnimate || char.frames == null) return broken;
+    var names = [for (f in char.frames.frames) if (f != null && f.name != null) f.name];
+    for (a in animations())
+    {
+      var prefix:String = a.prefix ?? '';
+      if (prefix == '') continue;
+      var found = false;
+      for (n in names)
+        if (n.startsWith(prefix))
+        {
+          found = true;
+          break;
+        }
+      if (!found) broken.push(a.name);
+    }
+    return broken;
+  }
+
+  /**
+   * Warn (and hide the character) when the selected animation's prefix doesn't exist in the sheet.
+   */
+  function updateAnimWarning():Void
+  {
+    if (errorText == null) return;
+    var ours = animWarningShown && errorText.text != '';
+    if (char == null)
+    {
+      if (ours) errorText.text = '';
+      animWarningShown = false;
+      return;
+    }
+    var broken = brokenAnims();
+    var a = currentAnim();
+    var currentBroken = a != null && broken.contains(a.name);
+    char.visible = !currentBroken;
+    if (ghost != null) ghost.visible = !broken.contains(ghostAnim);
+    if (broken.length == 0)
+    {
+      if (ours) errorText.text = '';
+      animWarningShown = false;
+      return;
+    }
+    if (errorText.text != '' && !ours) return; // A bigger problem is already shown.
+    var msg = currentBroken ? 'No frames in the spritesheet start with "${a.prefix}".\nPick one from the Prefix list, or fix the spelling.' : '';
+    var others = [for (n in broken) if (a == null || n != a.name) n];
+    if (others.length > 0) msg += (msg == '' ? '' : '\n') + 'Animations with a missing prefix: ${others.join(', ')}';
+    errorText.text = msg;
+    animWarningShown = true;
   }
 
   function addAnimation()

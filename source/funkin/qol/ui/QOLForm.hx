@@ -318,20 +318,42 @@ class QOLForm extends VBox
   {
     var picker = new ColorPickerPopup();
     picker.width = controlWidth;
+    var syncing = false;
+    function sync()
+    {
+      var v = get() & 0xFFFFFF;
+      var raw:Dynamic = picker.selectedItem;
+      var curInt:Int = raw == null ? -1 : ((raw : Int) & 0xFFFFFF);
+      if (curInt != v)
+      {
+        syncing = true;
+        picker.selectedItem = Color.fromComponents((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF, 255);
+        syncing = false;
+      }
+    }
+    // HaxeUI's picker reports black while it builds its popup, so for a moment after it opens its changes are ignored
+    // and the real color is put back.
+    var openedAt = -1.0;
+    picker.registerEvent(haxe.ui.events.MouseEvent.MOUSE_DOWN, function(_) {
+      openedAt = haxe.Timer.stamp();
+    });
     picker.onChange = function(_) {
-      if (refreshing) return;
+      if (refreshing || syncing) return;
+      var now = haxe.Timer.stamp();
+      if (!picker.dropDownOpen) openedAt = -1;
+      else if (openedAt < 0) openedAt = now;
+      if (openedAt < 0 || now - openedAt < 0.3)
+      {
+        haxe.ui.Toolkit.callLater(sync);
+        return;
+      }
       var raw:Dynamic = picker.selectedItem;
       if (raw == null) return;
       var c:Color = raw;
       set(0xFF000000 | (c.r << 16) | (c.g << 8) | c.b);
       changed();
     };
-    refreshers.push(() -> {
-      var v = get() & 0xFFFFFF;
-      var raw:Dynamic = picker.selectedItem;
-      var curInt:Int = raw == null ? -1 : ((raw : Int) & 0xFFFFFF);
-      if (curInt != v) picker.selectedItem = Color.fromComponents((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF, 255);
-    });
+    refreshers.push(sync);
     row(labelText, picker);
     refreshers[refreshers.length - 1]();
     return picker;

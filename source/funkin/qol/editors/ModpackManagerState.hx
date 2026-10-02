@@ -132,7 +132,7 @@ class ModpackManagerState extends QOLEditorState
     left.addComponent(newButton);
 
     // Center: metadata form.
-    var centerScroll = new ScrollView();
+    var centerScroll = new funkin.qol.ui.QOLScrollView();
     centerScroll.left = LIST_W + 16;
     centerScroll.top = top;
     centerScroll.width = FlxG.width - LIST_W - ICON_W - 32;
@@ -227,7 +227,7 @@ class ModpackManagerState extends QOLEditorState
     foldersTitle.text = 'Essential folders';
     foldersTitle.styleString = 'font-bold: true; color: #FF8FB8; padding-top: 8px;';
     right.addComponent(foldersTitle);
-    var foldersScroll = new ScrollView();
+    var foldersScroll = new funkin.qol.ui.QOLScrollView();
     foldersScroll.width = ICON_W - 22;
     foldersScroll.height = height - 360;
     foldersScroll.horizontalScrollPolicy = 'never';

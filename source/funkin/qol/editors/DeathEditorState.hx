@@ -128,7 +128,7 @@ class DeathEditorState extends QOLEditorState
     add(followPoint);
 
 
-    var title = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, 'Game over preview (1280x720)', 15, QOLTheme.TEXT_DIM, 1.5);
+    var title = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, 'Game over preview (${FlxG.width}x${FlxG.height})', 15, QOLTheme.TEXT_DIM, 1.5);
     title.cameras = [camUI];
     add(title);
     phaseLabel = QOLTheme.outlinedText(previewX, QOLEditorState.MENUBAR_HEIGHT + 8, previewW, '', 15, QOLTheme.ACCENT_YELLOW, 1.5);

@@ -37,10 +37,15 @@ class QOLScaledCameras
 
   /**
    * Position the display sprites (runs after Flixel's camera update every frame).
+   *
+   * Display sprites live in window pixels, not game pixels: when the window isn't exactly 1280x720 (maximized,
+   * resized, widescreen) every game coordinate has to be multiplied by the window's scale.
    */
   public function place():Void
   {
     held.resize(0);
+    var windowScaleX = FlxG.scaleMode.scale.x;
+    var windowScaleY = FlxG.scaleMode.scale.y;
     for (cam in cameras)
     {
       var ox = cam.x;
@@ -49,11 +54,12 @@ class QOLScaledCameras
       held.push(oy);
       if (ox != 0) cam.x = 0;
       if (oy != 0) cam.y = 0;
+      // Shake offsets are already in window pixels.
       @:privateAccess var shakeX = cam._fxShakeXOffset;
       @:privateAccess var shakeY = cam._fxShakeYOffset;
       cam.flashSprite.scaleX = cam.flashSprite.scaleY = scale;
-      cam.flashSprite.x = x + FlxG.width / 2 * scale + ox + shakeX * scale;
-      cam.flashSprite.y = y + FlxG.height / 2 * scale + oy + shakeY * scale;
+      cam.flashSprite.x = (x + cam.width * cam.initialZoom / 2 * scale + ox) * windowScaleX + shakeX * scale;
+      cam.flashSprite.y = (y + cam.height * cam.initialZoom / 2 * scale + oy) * windowScaleY + shakeY * scale;
     }
   }
 
