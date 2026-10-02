@@ -645,12 +645,57 @@ class AnimImport
 
   public static function importPsd(ed:AnimatorState):Void
   {
-    QOLFilePicker.open('Photoshop file (.psd)', ['psd'], false, files -> {
+    QOLFilePicker.open('Photoshop / ToonSquid / ibisPaint (.psd, or a .zip of PSDs)', ['psd', 'zip'], true, files -> {
+      var named:Array<{name:String, bytes:Bytes}> = [];
       try
       {
-        var doc = PSDFile.read(files[0].bytes, haxe.io.Path.withoutExtension(files[0].name), ed.doc.project.fps);
-        ed.setDocument(doc);
-        ed.notify('Imported', '${files[0].name}: ${AnimData.symbolLength(doc.main)} frame(s), ${doc.main.layers.length} layer(s).');
+        for (f in files)
+        {
+          if (QOLFilePicker.ext(f.name) == 'zip')
+          {
+            for (e in funkin.qol.util.QOLZip.read(f.bytes))
+              if (QOLFilePicker.ext(e.name) == 'psd') named.push({name: haxe.io.Path.withoutDirectory(e.name), bytes: e.data});
+          }
+          else
+            named.push({name: f.name, bytes: f.bytes});
+        }
+        if (named.length == 0) throw 'No .psd files found.';
+        named.sort((a, b) -> Reflect.compare(a.name.toLowerCase(), b.name.toLowerCase()));
+        var psds = [for (n in named) PSDCodec.read(n.bytes)];
+        var title = haxe.io.Path.withoutExtension(named[0].name);
+        function finish(mode:String)
+        {
+          try
+          {
+            var doc = PSDFile.toDoc(psds, title, ed.doc.project.fps, mode);
+            ed.setDocument(doc);
+            var how = switch (mode)
+            {
+              case PSDFile.MODE_TIMELINE: 'its frame animation';
+              case PSDFile.MODE_GROUPS: 'one frame per group';
+              case PSDFile.MODE_FILES: 'one frame per file';
+              default: 'its layers';
+            };
+            ed.notify('Imported', '$title: ${AnimData.symbolLength(doc.main)} frame(s), ${doc.main.layers.length} layer(s), from $how.');
+          }
+          catch (e)
+          {
+            ed.alert('Could not import', Std.string(e));
+          }
+        }
+        var mode = PSDFile.suggestedMode(psds);
+        if (mode == PSDFile.MODE_LAYERS && PSDFile.topGroups(psds[0]) >= 2)
+        {
+          // Groups might be frames (a common way to keep animation frames in a PSD).
+          var choice = PSDFile.MODE_GROUPS;
+          AnimExport.formDialog('Import PSD', 'Import', form -> {
+            form.note('This PSD has ${PSDFile.topGroups(psds[0])} groups at the top. How should it come in?');
+            form.dropdown('Import as', () -> [PSDFile.MODE_GROUPS, PSDFile.MODE_LAYERS], () -> choice, v -> choice = v,
+              () -> ['Each group is one frame', 'One frame with all the layers']);
+          }, () -> finish(choice));
+        }
+        else
+          finish(mode);
       }
       catch (e)
       {

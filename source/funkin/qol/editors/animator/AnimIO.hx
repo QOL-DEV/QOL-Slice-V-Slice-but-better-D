@@ -133,6 +133,8 @@ class AnimIO
   public static function fromARGB(argb:Bytes, w:Int, h:Int):BitmapData
   {
     var ba = ByteArray.fromBytes(argb);
+    // setPixels reads 32-bit ARGB values in the array's byte order.
+    ba.endian = openfl.utils.Endian.BIG_ENDIAN;
     ba.position = 0;
     var bmp = new BitmapData(w, h, true, 0);
     bmp.setPixels(new Rectangle(0, 0, w, h), ba);

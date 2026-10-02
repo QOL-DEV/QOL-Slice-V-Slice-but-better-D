@@ -110,6 +110,7 @@ class QOLSlice
       });
       // Dev: inspect the current screen from the browser console (tests).
       js.Syntax.code("window.qolState = {0}", function():Dynamic return FlxG.state);
+      js.Syntax.code("window.qolClass = {0}", function(name:String):Dynamic return Type.resolveClass(name));
       js.Syntax.code("window.qolList = {0}", function(p:String):String {
         return funkin.qol.util.QOLFS.listFilesRecursive(p).join('\n');
       });

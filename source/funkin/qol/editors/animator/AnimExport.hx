@@ -157,24 +157,47 @@ class AnimExport
   public static function psdDialog(ed:AnimatorState, animated:Bool):Void
   {
     var base = 'export/' + AnimIO.fileId(ed.doc.project.name);
-    var path = animated ? base + '.psd' : base;
-    formDialog(animated ? 'Export Animated PSD (ToonSquid)' : 'Export Layered PSD per Frame (ibisPaint)', 'Export', form -> {
-      form.textField(animated ? 'Save as (in your mod)' : 'Folder (in your mod)', () -> path, v -> path = v);
-      if (animated) form.note('One layer group per frame, with Photoshop frame animation data. ToonSquid imports it onto its timeline.');
+    var path = animated ? base + '.psd' : base + '-frames';
+    var zip = true;
+    formDialog(animated ? 'Export Animated PSD (ToonSquid / Photoshop)' : 'Export Layered PSD per Frame (ibisPaint)', 'Export', form -> {
+      form.textField(animated ? 'Save as (in your mod)' : 'Name (in your mod)', () -> path, v -> path = v);
+      if (animated)
+      {
+        form.note('One layer group per frame (held frames share one), with Photoshop frame animation data. '
+          + 'Photoshop plays it in Timeline > Frame Animation; ToonSquid imports it onto its timeline.');
+      }
       else
-        form.note('One layered PSD per frame (frame0001.psd...). ibisPaint opens them with their layers.');
+      {
+        form.check('Pack them into one .zip', () -> zip, v -> zip = v);
+        form.note('One layered PSD per frame (frame0001.psd...). ibisPaint, Krita and GIMP open them with their layers; '
+          + 'ToonSquid imports the .zip as a PSD sequence.');
+      }
     }, () -> {
       if (animated)
       {
+        if (!StringTools.endsWith(path.toLowerCase(), '.psd')) path += '.psd';
         var saved = ModWorkspace.saveBytes(path, PSDFile.writeAnimated(ed.doc, ed.sym));
         ed.notify('Exported', saved);
       }
       else
       {
         var len = AnimData.symbolLength(ed.sym);
-        for (f in 0...len)
-          ModWorkspace.saveBytes('$path/frame${StringTools.lpad('${f + 1}', '0', 4)}.psd', PSDFile.writeFrame(ed.doc, ed.sym, f));
-        ed.notify('Exported', '$len PSD files in $path/');
+        var files = [
+          for (f in 0...len)
+            {name: 'frame${StringTools.lpad('${f + 1}', '0', 4)}.psd', data: PSDFile.writeFrame(ed.doc, ed.sym, f)}
+        ];
+        if (zip)
+        {
+          var zpath = StringTools.endsWith(path.toLowerCase(), '.zip') ? path : path + '.zip';
+          var saved = ModWorkspace.saveBytes(zpath, funkin.qol.util.QOLZip.write(files));
+          ed.notify('Exported', '$len PSD files in $saved');
+        }
+        else
+        {
+          for (f in files)
+            ModWorkspace.saveBytes('$path/${f.name}', f.data);
+          ed.notify('Exported', '$len PSD files in $path/');
+        }
       }
     });
   }
