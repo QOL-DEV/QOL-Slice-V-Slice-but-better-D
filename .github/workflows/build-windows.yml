@@ -1,0 +1,89 @@
+# Builds QOL Slice for Windows on GitHub's own Windows machines and uploads the finished game.
+# Download it from the run's page: Actions > "Build QOL Slice (Windows)" > a run > Artifacts > QOL-Slice-Windows.
+
+name: Build QOL Slice (Windows)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows build
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      HXCPP_COMPILE_CACHE: ${{ github.workspace }}\.hxcpp_cache
+      HXCPP_CACHE_MB: 4096
+    steps:
+      - name: Checkout QOL Slice
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Download the base game's assets (FunkinCrew/Funkin.assets)
+        run: |
+          git submodule update --init --depth 1 assets || git submodule update --init assets
+
+      - name: Install Haxe 4.3.7
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.7
+
+      - name: Set up haxelib and hmm (FunkinCrew's patched versions, like V-Slice uses)
+        run: |
+          haxelib --never --global git haxelib https://github.com/FunkinCrew/haxelib.git funkin-patches --skip-dependencies
+          haxelib --never --global git hmm https://github.com/FunkinCrew/hmm funkin-patches
+          haxelib --never newrepo
+          haxelib version
+
+      - name: Restore cached libraries
+        id: cache-libs
+        uses: actions/cache@v4
+        with:
+          path: .haxelib
+          key: qol-haxelib-${{ runner.os }}-${{ hashFiles('hmm.json') }}-v1
+
+      - name: Install libraries from hmm.json
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        run: |
+          haxelib --global run hmm install -q
+          haxelib list
+
+      - name: Build the hxcpp tool
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        working-directory: .haxelib/hxcpp/git/tools/hxcpp
+        run: haxe compile.hxml
+
+      - name: Build Lime's native library (lime.ndll for Windows 64-bit)
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        run: |
+          git -C .haxelib/lime/git submodule update --init --recursive --depth 1 || git -C .haxelib/lime/git submodule update --init --recursive
+          haxelib run lime rebuild windows -64 -release -nocolor
+          ls -la .haxelib/lime/git/ndll/Windows64
+
+      - name: Restore C++ compile cache
+        uses: actions/cache@v4
+        with:
+          path: .hxcpp_cache
+          key: qol-hxcpp-${{ runner.os }}-${{ github.sha }}
+          restore-keys: qol-hxcpp-${{ runner.os }}-
+
+      - name: Build QOL Slice
+        run: haxelib run lime build windows -release -nocolor
+
+      - name: Upload the game
+        uses: actions/upload-artifact@v4
+        with:
+          name: QOL-Slice-Windows
+          path: export/release/windows/bin/
+          if-no-files-found: error
+          compression-level: 6
