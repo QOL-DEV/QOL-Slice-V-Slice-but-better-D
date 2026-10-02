@@ -78,7 +78,19 @@ jobs:
           restore-keys: qol-hxcpp-${{ runner.os }}-
 
       - name: Build QOL Slice
-        run: haxelib run lime build windows -release -nocolor
+        run: |
+          set -o pipefail
+          haxelib run lime build windows -release -nocolor 2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
+        run: |
+          # Attach the important lines to the run as annotations (visible on the run's summary page).
+          enc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          if [ -f build.log ]; then
+            echo "::error title=Build errors::$(grep -i -E 'error|fatal|undefined|unresolved|cannot|not found' build.log | grep -v -i 'warning' | head -n 60 | enc)"
+            echo "::warning title=End of build log::$(tail -n 60 build.log | enc)"
+          fi
 
       - name: Upload the game
         uses: actions/upload-artifact@v4
