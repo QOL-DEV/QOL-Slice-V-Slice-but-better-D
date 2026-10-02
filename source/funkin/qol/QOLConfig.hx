@@ -51,6 +51,16 @@ class QOLConfig
    */
   public static var fancyMenus(get, set):Bool;
 
+  /**
+   * Gameplay: once a texture is on the graphics card, free the copy in normal memory (saves a lot of RAM).
+   */
+  public static var gpuTextures(get, set):Bool;
+
+  /**
+   * Give memory back when leaving the editors and between songs.
+   */
+  public static var cleanMemory(get, set):Bool;
+
   static var data:Dynamic = null;
 
   static function ensureLoaded():Void
@@ -161,6 +171,18 @@ class QOLConfig
 
   static function set_fancyMenus(value:Bool):Bool
     return setField('fancyMenus', value);
+
+  static function get_gpuTextures():Bool
+    return getField('gpuTextures', true);
+
+  static function set_gpuTextures(value:Bool):Bool
+    return setField('gpuTextures', value);
+
+  static function get_cleanMemory():Bool
+    return getField('cleanMemory', true);
+
+  static function set_cleanMemory(value:Bool):Bool
+    return setField('cleanMemory', value);
 
   /**
    * Mod load order (folder names). Mods not listed load after these, alphabetically.

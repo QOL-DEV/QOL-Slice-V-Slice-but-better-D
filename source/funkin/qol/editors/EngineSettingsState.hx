@@ -55,6 +55,17 @@ class EngineSettingsState extends QOLEditorState
     form.section('Menus');
     form.check('Fancy menus', () -> QOLConfig.fancyMenus, v -> QOLConfig.fancyMenus = v);
     form.note('Beat bumps, floating arrows, sparkles and intro animations in QOL Slice menus. Turn off on slow PCs.');
+    form.section('Performance');
+    form.check('GPU textures (saves RAM)', () -> QOLConfig.gpuTextures, v -> QOLConfig.gpuTextures = v);
+    form.note('During songs, images that are already on the graphics card don\'t keep a second copy in memory. '
+      + 'Turn off only if a mod\'s script needs to read image pixels in-game.');
+    if (funkin.qol.util.QOLPerformance.freedTextures > 0)
+    {
+      form.note('This session: ${funkin.qol.util.QOLPerformance.freedTextures} images moved to the GPU, about '
+        + '${Math.round(funkin.qol.util.QOLPerformance.freedBytes / 1048576)} MB of RAM saved.');
+    }
+    form.check('Free memory when leaving editors', () -> QOLConfig.cleanMemory, v -> QOLConfig.cleanMemory = v);
+    form.note('Drops images the editors loaded for their previews and gives the memory back.');
     form.section('Releasing your mod');
     form.note('Lock the Mod Menu before you share your finished mod, so players can\'t open the editors with 7 or ~.');
     panel.addComponent(form);

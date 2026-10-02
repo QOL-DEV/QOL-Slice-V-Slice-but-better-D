@@ -1013,8 +1013,13 @@ class Project extends HXProject
 
     // Enable stack trace tracking. Good for debugging but has a (minor) performance impact.
     setHaxedef("HXCPP_CHECK_POINTER");
-    setHaxedef("HXCPP_STACK_LINE");
     setHaxedef("HXCPP_STACK_TRACE");
+    // QOL Slice: per-line tracking costs CPU on every line of game code, so release builds only keep function names in
+    // crash logs. Build with -DQOL_DEBUG_LINES to get line numbers back.
+    if (isDebug() || FEATURE_DEBUG_FUNCTIONS.isEnabled(this) || hasDefine("QOL_DEBUG_LINES"))
+    {
+      setHaxedef("HXCPP_STACK_LINE");
+    }
     setHaxedef("hscriptPos");
 
     if (FEATURE_DEBUG_FUNCTIONS.isDisabled(this))

@@ -917,10 +917,23 @@ class QOLEditorState extends UIState
    */
   public var mouseOverUI(get, never):Bool;
 
+  var overUICache:Bool = false;
+  var overUIStamp:Float = -1;
+  var overUIX:Float = -1;
+  var overUIY:Float = -1;
+
   function get_mouseOverUI():Bool
   {
     if (panelInteracting || resizePanel != null || resizingArea || dragPanel != null || panelCursorSet) return true;
-    return Screen.instance.hasSolidComponentUnderPoint(Screen.instance.currentMouseX, Screen.instance.currentMouseY);
+    // Walking every UI component is slow, and editors ask several times a frame: remember the answer for this frame.
+    var mx = Screen.instance.currentMouseX;
+    var my = Screen.instance.currentMouseY;
+    if (overUIStamp == FlxG.game.ticks && mx == overUIX && my == overUIY) return overUICache;
+    overUIStamp = FlxG.game.ticks;
+    overUIX = mx;
+    overUIY = my;
+    overUICache = Screen.instance.hasSolidComponentUnderPoint(mx, my);
+    return overUICache;
   }
 
   /**

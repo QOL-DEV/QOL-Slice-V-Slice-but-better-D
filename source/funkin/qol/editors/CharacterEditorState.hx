@@ -892,6 +892,8 @@ class CharacterEditorState extends QOLEditorState
   {
     if (iconPreview == null || iconPreview.frame == null) return;
     var bmp:BitmapData = iconPreview.frame.parent.bitmap;
+    // The game may have moved this image to the graphics card only (see QOLPerformance); load a readable copy.
+    if (!bmp.readable) bmp = openfl.utils.Assets.getBitmapData(iconPreview.frame.parent.key, false) ?? bmp;
     var rect = iconPreview.frame.frame;
     var r = 0.0, g = 0.0, b = 0.0, n = 0.0;
     var step = Std.int(Math.max(1, rect.width / 40));

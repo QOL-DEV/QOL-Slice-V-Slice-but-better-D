@@ -71,6 +71,7 @@ class QOLSlice
   {
     QOLConfig.reload();
     funkin.qol.runtime.QOLRuntime.init();
+    funkin.qol.util.QOLPerformance.init();
     trace('[QOL] $versionString initialized. Mod Menu ${modMenuAvailable ? 'enabled' : 'locked'}.');
   }
 
