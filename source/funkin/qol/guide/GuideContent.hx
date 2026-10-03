@@ -222,30 +222,65 @@ Space plays, Home goes back to the start, Enter playtests from the playhead (Shi
       id: 'animator',
       title: 'Animator',
       body: "
-The Animator is a Flash-style animation studio: a timeline with layers, folders and masks, symbols, classic and shape tweens, vector and bitmap drawing, filters, blend modes, a camera and sound. It opens and saves Adobe Animate files.
+The Animator is a Flash-style animation studio: a timeline with layers, folders and masks, symbols, classic and shape tweens, vector and bitmap drawing, filters, blend modes, a camera and sound. It opens and saves Adobe Animate files, and uses Adobe Animate's keyboard and mouse shortcuts, so moving over from Animate is easy.
+
+> Help > Keyboard Shortcuts (Ctrl+Alt+Shift+K) lists every shortcut.
 
 # Tools
-- V Select, B Brush, Y Pencil, E Eraser, K Bucket.
-- N Line, R Rectangle, O Oval, P Polygon, T Text.
-- I Eyedropper, H Hand, Z Zoom.
-Drag with Select to box-select part of a drawing: lines and fills are cut where the box crosses them, just like Animate. The Eraser erases parts of lines and fills too. Bitmap (paint) layers can be selected and moved by pixels.
+- V Selection, A Subselection, Q Free Transform, L Lasso, P Pen, T Text.
+- N Line, R Rectangle, O Oval, PolyStar (no key, like Animate), Y Pencil, B Brush.
+- K Paint Bucket, S Ink Bottle, I Eyedropper, E Eraser.
+- H Hand, Shift+H Rotation (turns the view), Z Zoom, C Camera.
+- Hold Space for the Hand tool, hold Ctrl for the Selection tool.
+
+# Reshaping, like Animate
+- With the Selection tool, drag the edge of a shape to bend it into a curve, and drag a corner to move it.
+- Ctrl+drag (or Alt+drag) an edge to add a corner.
+- The Subselection tool shows a shape's points and curve handles: drag them to reshape.
+- Fills and outlines that share an edge stay joined.
+- Drag with the Selection tool across part of a drawing (or draw around it with the Lasso) and only that part is selected; on paint layers the pixels inside are lifted so they can be moved.
+
+# Pen
+Click for corners, drag for curves. Click the first point to close the shape (it's filled), or double-click, press Enter or Ctrl+click to end an open line.
+
+# Drawing keys
+- Shift: squares, circles, lines at 45 degrees, straight brush strokes.
+- Alt: rectangles and ovals drawn from the middle.
+- [ and ]: brush size. X: swap the stroke and fill colors.
+- The Eyedropper picks a line's color (and switches to the Ink Bottle) or a fill's color (and switches to the Paint Bucket).
+
+# Selecting and arranging
+- Shift+click adds to the selection, Alt+drag drags a copy, Ctrl+D duplicates, Ctrl+Shift+V pastes in place.
+- Ctrl+G groups, Ctrl+Shift+G ungroups.
+- Ctrl+K opens Align; Ctrl+Alt+1 to 6 align left, center, right, top, middle and bottom; Ctrl+Alt+7 and 9 space things out; Ctrl+Alt+8 aligns to the stage.
+- Ctrl+Alt+S scales and rotates by exact amounts, Ctrl+Shift+Z removes the transform, Ctrl+Shift+9 and 7 rotate 90 degrees.
+- Ctrl+Up / Ctrl+Down bring forward / send backward (add Shift for front / back).
 
 # The timeline
-- F5 insert frame, Shift+F5 remove frames.
-- F6 keyframe, F7 blank keyframe, Shift+F6 clear keyframe.
-- Right-click frames to make a classic tween, copy or reverse frames.
-- Layers can be put in folders and turned into masks. The eye and the lock hide and lock them (folders hide and lock everything inside).
-- Enter plays. , and . step through frames. Home and End jump to the ends.
+- F5 insert frames, Shift+F5 remove frames.
+- F6 keyframe (on every selected frame), F7 blank keyframe, Shift+F6 clear keyframe.
+- Ctrl+Alt+C / X / V copy, cut and paste frames, Ctrl+Alt+A selects all frames.
+- Drag a keyframe to move it, Alt+drag to copy it. Ctrl+drag the end of a frame span to make it longer or shorter. Double-click a frame to select its span.
+- Alt+click a layer's eye or lock to show or unlock only that layer.
+- Enter plays, , and . step through frames, Home / End (or Shift+, / Shift+.) jump to the ends.
+- Alt+Shift+O turns the onion skin on and off.
+- Ctrl+Enter tests the movie: it plays from the start with the panels out of the way (Esc stops).
 
 # Symbols
-Select something and press F8 (or right-click > Convert to Symbol). Double-click a symbol to edit it, and set how it plays (loop, play once, single frame) in its properties. Ctrl+B breaks it apart again.
+Select something and press F8 (or right-click > Convert to Symbol). Double-click a symbol to edit it, Ctrl+E goes in and back out, and double-clicking an empty spot goes back up. Ctrl+F8 makes an empty symbol, Ctrl+B breaks one apart.
+
+# View
+- Ctrl+= and Ctrl+- zoom, Ctrl+1 is 100%, Ctrl+2 fits the stage, Ctrl+3 shows everything, Ctrl+4 and Ctrl+8 are 400% and 800%.
+- Ctrl+' shows the grid, Ctrl+Shift+' snaps to it, Ctrl+Alt+G sets its size.
+- Ctrl+H hides selection edges, Ctrl+Alt+Shift+O shows every layer as outlines, F4 hides the panels.
+- Ctrl+L opens the Library, Ctrl+J the document settings.
 
 # Bringing things in
-Drag files straight onto the Animator, or use File > Import: images, Sparrow sheets, Animate texture atlases, PNG sequences, sprite sheet grids, .fla/.xfl files, PSDs (Photoshop, ToonSquid, ibisPaint), videos and GIFs, and audio.
+Drag files straight onto the Animator, press Ctrl+R, or use File > Import: images, Sparrow sheets, Animate texture atlases, PNG sequences, sprite sheet grids, .fla/.xfl files, PSDs (Photoshop, ToonSquid, ibisPaint), videos and GIFs, and audio.
 
 # Exporting
 - Sprite Atlas for the Game: a Sparrow PNG + XML the game can use for characters and props.
-- Animate texture atlas, PNG sequence, .fla, animated PSD, layered PSDs, video with sound, GIF, or the sound mix as a WAV.
+- Animate texture atlas, PNG sequence, .fla, animated PSD, layered PSDs, video with sound (Ctrl+Alt+Shift+S), GIF, or the sound mix as a WAV.
 
 > Right-click the canvas, the timeline or a layer for the most common actions. View > Theme changes the Animator's colors.
 "

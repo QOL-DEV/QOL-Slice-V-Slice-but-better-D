@@ -12,6 +12,8 @@ import funkin.qol.ui.QOLEditorState;
 import funkin.qol.ui.QOLForm;
 import funkin.qol.ui.QOLTheme;
 import haxe.ui.components.Button;
+import haxe.ui.components.CheckBox;
+import openfl.display.BlendMode;
 import haxe.ui.components.Label;
 import haxe.ui.containers.HBox;
 import haxe.ui.containers.ListView;
@@ -49,21 +51,36 @@ typedef AnimSel =
  */
 class AnimatorState extends QOLEditorState
 {
+  /**
+   * The tools, in Adobe Animate's order and with its keys (PolyStar has no key in Animate either).
+   */
   public static final TOOLS:Array<{id:String, name:String, key:String}> = [
-    {id: 'select', name: 'Select', key: 'V'},
-    {id: 'brush', name: 'Brush', key: 'B'},
-    {id: 'pencil', name: 'Pencil', key: 'Y'},
-    {id: 'eraser', name: 'Eraser', key: 'E'},
-    {id: 'fill', name: 'Bucket', key: 'K'},
+    {id: 'select', name: 'Selection', key: 'V'},
+    {id: 'subselect', name: 'Subselection', key: 'A'},
+    {id: 'transform', name: 'Free Transform', key: 'Q'},
+    {id: 'lasso', name: 'Lasso', key: 'L'},
+    {id: 'pen', name: 'Pen', key: 'P'},
+    {id: 'text', name: 'Text', key: 'T'},
     {id: 'line', name: 'Line', key: 'N'},
     {id: 'rect', name: 'Rectangle', key: 'R'},
     {id: 'oval', name: 'Oval', key: 'O'},
-    {id: 'poly', name: 'Polygon', key: 'P'},
-    {id: 'text', name: 'Text', key: 'T'},
+    {id: 'poly', name: 'PolyStar', key: ''},
+    {id: 'pencil', name: 'Pencil', key: 'Y'},
+    {id: 'brush', name: 'Brush', key: 'B'},
+    {id: 'fill', name: 'Paint Bucket', key: 'K'},
+    {id: 'ink', name: 'Ink Bottle', key: 'S'},
     {id: 'picker', name: 'Eyedropper', key: 'I'},
+    {id: 'eraser', name: 'Eraser', key: 'E'},
     {id: 'hand', name: 'Hand', key: 'H'},
+    {id: 'rotview', name: 'Rotation', key: 'Shift+H'},
     {id: 'zoom', name: 'Zoom', key: 'Z'},
   ];
+
+  /**
+   * Tools that select things (the selection box and the item's properties show with these).
+   */
+  public static inline function selectsThings(id:String):Bool
+    return id == 'select' || id == 'subselect' || id == 'transform' || id == 'lasso';
 
   static inline final CONTROLS_H:Int = 36;
 
@@ -138,6 +155,11 @@ class AnimatorState extends QOLEditorState
    */
   public var clipStage:Bool = false;
   public var onion:Bool = false;
+
+  /**
+   * Every layer drawn as outlines (Animate's View > Preview Mode > Outlines).
+   */
+  public var allOutlines:Bool = false;
   public var onionBefore:Int = 2;
   public var onionAfter:Int = 2;
   public var loopPlayback:Bool = true;
@@ -467,11 +489,8 @@ class AnimatorState extends QOLEditorState
     addMenuItem(file, 'New Animation...', 'Ctrl+N', newDocDialog);
     addMenuItem(file, 'Open...', 'Ctrl+O', openDialog);
     addMenuItem(file, 'Save', 'Ctrl+S', () -> doSave());
-    addMenuItem(file, 'Save As...', null, () -> prompt('Save As', 'Animation name', doc.project.name, n -> {
-      if (n == null || n == '') return;
-      doc.project.name = n;
-      doSave();
-    }));
+    addMenuItem(file, 'Save As...', 'Ctrl+Shift+S', saveAsDialog);
+    addMenuItem(file, 'Import to Stage...', 'Ctrl+R', importToStage);
     addMenuSeparator(file);
     var imp = addSubMenu(file, 'Import');
     addMenuItem(imp, 'Image to Library (PNG)...', null, () -> AnimImport.importLibraryImage(this));
@@ -491,7 +510,7 @@ class AnimatorState extends QOLEditorState
     addMenuItem(exp, 'Animated PSD (for ToonSquid)...', null, () -> AnimExport.psdDialog(this, true));
     addMenuItem(exp, 'Layered PSD per Frame (for ibisPaint)...', null, () -> AnimExport.psdDialog(this, false));
     addMenuSeparator(exp);
-    addMenuItem(exp, 'Video (AVI with sound)...', null, () -> AnimExport.videoDialog(this));
+    addMenuItem(exp, 'Video (AVI with sound)...', 'Ctrl+Alt+Shift+S', () -> AnimExport.videoDialog(this));
     addMenuItem(exp, 'Animated GIF...', null, () -> AnimExport.gifDialog(this));
     addMenuItem(exp, 'Sound Mix (WAV)...', null, () -> AnimExport.soundDialog(this));
 
@@ -504,21 +523,45 @@ class AnimatorState extends QOLEditorState
       deleteSelection();
     });
     addMenuItem(edit, 'Copy', 'Ctrl+C', copySelection);
-    addMenuItem(edit, 'Paste', 'Ctrl+V', pasteSelection);
+    addMenuItem(edit, 'Paste', 'Ctrl+V', () -> pasteSelection());
+    addMenuItem(edit, 'Paste in Place', 'Ctrl+Shift+V', () -> pasteSelection(true));
+    addMenuItem(edit, 'Duplicate', 'Ctrl+D', duplicateSelection);
     addMenuItem(edit, 'Delete', 'Delete', deleteSelection);
     addMenuItem(edit, 'Select All', 'Ctrl+A', selectAll);
+    addMenuItem(edit, 'Deselect All', 'Ctrl+Shift+A', deselectAll);
     addMenuSeparator(edit);
+    addMenuItem(edit, 'Cut Frames', 'Ctrl+Alt+X', cutFrames);
     addMenuItem(edit, 'Copy Frames', 'Ctrl+Alt+C', copyFrames);
     addMenuItem(edit, 'Paste Frames', 'Ctrl+Alt+V', pasteFrames);
+    addMenuItem(edit, 'Select All Frames', 'Ctrl+Alt+A', selectAllFrames);
+    addMenuSeparator(edit);
+    addMenuItem(edit, 'Edit Symbol / Edit Document', 'Ctrl+E', editSymbolToggle);
 
     var modify = addMenu('Modify');
     addMenuItem(modify, 'Convert to Symbol', 'F8', convertToSymbol);
+    addMenuItem(modify, 'New Symbol...', 'Ctrl+F8', newSymbol);
     addMenuItem(modify, 'Break Apart', 'Ctrl+B', breakApart);
+    addMenuItem(modify, 'Group', 'Ctrl+G', groupSelection);
+    addMenuItem(modify, 'Ungroup', 'Ctrl+Shift+G', ungroupSelection);
     addMenuSeparator(modify);
+    addMenuItem(modify, 'Scale and Rotate...', 'Ctrl+Alt+S', scaleRotateDialog);
+    addMenuItem(modify, 'Remove Transform', 'Ctrl+Shift+Z', removeTransform);
     addMenuItem(modify, 'Flip Horizontal', null, () -> transformSelection(m -> m.scale(-1, 1)));
     addMenuItem(modify, 'Flip Vertical', null, () -> transformSelection(m -> m.scale(1, -1)));
-    addMenuItem(modify, 'Rotate 90 Clockwise', null, () -> transformSelection(m -> m.rotate(Math.PI / 2)));
-    addMenuItem(modify, 'Rotate 90 Counter-Clockwise', null, () -> transformSelection(m -> m.rotate(-Math.PI / 2)));
+    addMenuItem(modify, 'Rotate 90 Clockwise', 'Ctrl+Shift+9', () -> transformSelection(m -> m.rotate(Math.PI / 2)));
+    addMenuItem(modify, 'Rotate 90 Counter-Clockwise', 'Ctrl+Shift+7', () -> transformSelection(m -> m.rotate(-Math.PI / 2)));
+    addMenuSeparator(modify);
+    var align = addSubMenu(modify, 'Align');
+    addMenuItem(align, 'Align Panel...', 'Ctrl+K', alignDialog);
+    addMenuItem(align, 'Left', 'Ctrl+Alt+1', () -> alignSelection('left'));
+    addMenuItem(align, 'Horizontal Center', 'Ctrl+Alt+2', () -> alignSelection('hcenter'));
+    addMenuItem(align, 'Right', 'Ctrl+Alt+3', () -> alignSelection('right'));
+    addMenuItem(align, 'Top', 'Ctrl+Alt+4', () -> alignSelection('top'));
+    addMenuItem(align, 'Vertical Center', 'Ctrl+Alt+5', () -> alignSelection('vcenter'));
+    addMenuItem(align, 'Bottom', 'Ctrl+Alt+6', () -> alignSelection('bottom'));
+    addMenuItem(align, 'Distribute Across', 'Ctrl+Alt+7', () -> distributeSelection(true));
+    addMenuItem(align, 'Distribute Down', 'Ctrl+Alt+9', () -> distributeSelection(false));
+    addMenuCheck(align, 'Align to Stage', alignToStage, v -> alignToStage = v);
     addMenuSeparator(modify);
     addMenuItem(modify, 'Bring to Front', 'Ctrl+Shift+Up', () -> arrange(99999));
     addMenuItem(modify, 'Bring Forward', 'Ctrl+Up', () -> arrange(1));
@@ -528,8 +571,8 @@ class AnimatorState extends QOLEditorState
     var insert = addMenu('Timeline');
     addMenuItem(insert, 'Insert Frame', 'F5', () -> insertFrames(1));
     addMenuItem(insert, 'Remove Frames', 'Shift+F5', removeFrames);
-    addMenuItem(insert, 'Insert Keyframe', 'F6', () -> insertKeyframe(false));
-    addMenuItem(insert, 'Insert Blank Keyframe', 'F7', () -> insertKeyframe(true));
+    addMenuItem(insert, 'Insert Keyframe', 'F6', () -> insertKeyframes(false));
+    addMenuItem(insert, 'Insert Blank Keyframe', 'F7', () -> insertKeyframes(true));
     addMenuItem(insert, 'Clear Keyframe', 'Shift+F6', clearKeyframe);
     addMenuSeparator(insert);
     addMenuItem(insert, 'Create Classic Tween', null, () -> setTween(true));
@@ -547,16 +590,25 @@ class AnimatorState extends QOLEditorState
     var view = addMenu('View');
     addMenuItem(view, 'Zoom In', 'Ctrl+=', () -> zoomAt(1.25, centerX(), centerY()));
     addMenuItem(view, 'Zoom Out', 'Ctrl+-', () -> zoomAt(0.8, centerX(), centerY()));
-    addMenuItem(view, 'Fit Stage', 'Ctrl+0', fitView);
-    addMenuItem(view, '100%', 'Ctrl+1', () -> {
-      zoom = 1;
-      centerStage();
-    });
+    addMenuItem(view, 'Fit Stage (Show Frame)', 'Ctrl+2', fitView);
+    addMenuItem(view, 'Show All', 'Ctrl+3', showAll);
+    addMenuItem(view, '100%', 'Ctrl+1', () -> zoomTo(1));
+    addMenuItem(view, '400%', 'Ctrl+4', () -> zoomTo(4));
+    addMenuItem(view, '800%', 'Ctrl+8', () -> zoomTo(8));
     addMenuSeparator(view);
     addMenuCheck(view, 'Onion Skin', onion, v -> {
       onion = v;
       renderDirty = true;
     });
+    addMenuCheck(view, 'Outlines', allOutlines, v -> {
+      allOutlines = v;
+      renderDirty = true;
+    });
+    addMenuCheck(view, 'Show Grid', showGrid, v -> showGrid = v);
+    addMenuCheck(view, 'Snap to Grid', snapGrid, v -> snapGrid = v);
+    addMenuItem(view, 'Edit Grid...', 'Ctrl+Alt+G', gridDialog);
+    addMenuCheck(view, 'Hide Edges', hideEdges, v -> hideEdges = v);
+    addMenuItem(view, 'Hide Panels', 'F4', togglePanels);
     addMenuCheck(view, 'Loop Playback', loopPlayback, v -> loopPlayback = v);
     addMenuSeparator(view);
     addMenuItem(view, 'Theme...', null, () -> openThemeDialog());
@@ -569,10 +621,15 @@ class AnimatorState extends QOLEditorState
 
     var control = addMenu('Control');
     addMenuItem(control, 'Play / Stop', 'Enter', togglePlay);
+    addMenuItem(control, 'Test Movie', 'Ctrl+Enter', testMovie);
     addMenuItem(control, 'Next Frame', '.', () -> setFrame(frame + 1));
     addMenuItem(control, 'Previous Frame', ',', () -> setFrame(Std.int(Math.max(0, frame - 1))));
     addMenuItem(control, 'First Frame', 'Home', () -> setFrame(0));
     addMenuItem(control, 'Last Frame', 'End', () -> setFrame(AnimData.symbolLength(sym) - 1));
+
+    var help = addMenu('Help');
+    addMenuItem(help, 'Keyboard Shortcuts (Adobe Animate)', 'Ctrl+Alt+Shift+K', shortcutsDialog);
+    addMenuItem(help, 'Animator Guide', 'F1', openGuide);
   }
 
   function buildToolsPanel():Void
@@ -595,7 +652,7 @@ class AnimatorState extends QOLEditorState
       b.height = 36;
       b.addClass('anim-tool');
       b.icon = AnimatorSkin.icon(t.id, 22, AnimatorSkin.TOOL_COLORS.get(t.id));
-      b.tooltip = '${t.name}  (${t.key})';
+      b.tooltip = t.key == '' ? t.name : '${t.name}  (${t.key})';
       var id = t.id;
       b.onClick = _ -> setTool(id);
       toolButtons.set(t.id, b);
@@ -1234,7 +1291,7 @@ class AnimatorState extends QOLEditorState
       if (!playing) canvasEmpty = !hasAnyContent();
       drawChecker();
       contentHolder.removeChildren();
-      var content = renderer.render(sym, frame, {collectHits: true, outerCamera: viewCamera()});
+      var content = renderer.render(sym, frame, {collectHits: true, outerCamera: viewCamera(), allOutlines: allOutlines});
       content.x = symOffsetX();
       content.y = symOffsetY();
       contentHolder.addChild(content);
@@ -1467,7 +1524,7 @@ class AnimatorState extends QOLEditorState
     g.clear();
     // Selection.
     var b = selectionBounds();
-    if (b != null && tool == 'select')
+    if (b != null && (selectsThings(tool) || tempSelect()) && !hideEdges)
     {
       var hs = screenHandles(b);
       g.lineStyle(1, 0x5CE1FF, 1);
@@ -1482,7 +1539,8 @@ class AnimatorState extends QOLEditorState
       }
       g.lineStyle();
     }
-    drawPixelSelection(g);
+    if (!hideEdges) drawPixelSelection(g);
+    drawAnimateOverlay(g);
     // Marquee.
     if (drag == 'marquee' || drag == 'pixmarquee')
     {
@@ -1586,6 +1644,7 @@ class AnimatorState extends QOLEditorState
   var lastPaint:Null<Point> = null;
   var overCanvas:Bool = false;
   var lastClickTime:Float = 0;
+  var lastEmptyClick:Float = 0;
   var spaceHand:Bool = false;
 
   function inWorkArea(mx:Float, my:Float):Bool
@@ -1736,10 +1795,29 @@ class AnimatorState extends QOLEditorState
       return;
     }
 
-    switch (tool)
+    var t = tool;
+    // Ctrl (Command) switches to the Selection tool while it's held, like Animate. Ctrl+click also ends a Pen path.
+    if (tempSelect())
+    {
+      if (penPts.length > 0) finishPen(false);
+      t = 'select';
+    }
+    switch (t)
     {
       case 'select':
-        selectDown(mx, my, local);
+        selectDown(mx, my, local, true);
+      case 'transform':
+        selectDown(mx, my, local, false);
+      case 'subselect':
+        subselectDown(mx, my, local);
+      case 'lasso':
+        lassoDown(mx, my, local);
+      case 'pen':
+        penDown(mx, my, snapLocal(local));
+      case 'ink':
+        inkBottle(local);
+      case 'rotview':
+        rotviewDown(mx, my);
       case 'brush' | 'pencil' | 'eraser':
         doc.checkpoint();
         var key = drawKey();
@@ -1771,9 +1849,11 @@ class AnimatorState extends QOLEditorState
       case 'text':
         addText(local);
       case 'picker':
-        pickColor(mx, my, FlxG.keys.pressed.ALT);
+        pickColorAnimate(mx, my, local);
       case 'zoom':
-        zoomAt(FlxG.keys.pressed.ALT ? 0.8 : 1.25, mx, my);
+        if (FlxG.keys.pressed.ALT) zoomAt(0.8, mx, my);
+        else
+          drag = 'zoombox';
       default:
     }
   }
@@ -1790,6 +1870,14 @@ class AnimatorState extends QOLEditorState
         if (lastPaint != null) paintDab(lastPaint, local, false);
         lastPaint = local;
       case 'stroke':
+        // Shift keeps the stroke straight across or straight down (Animate).
+        if (FlxG.keys.pressed.SHIFT && points.length > 0)
+        {
+          var first = points[0];
+          if (Math.abs(local.x - first.x) >= Math.abs(local.y - first.y)) local.y = first.y;
+          else
+            local.x = first.x;
+        }
         var last = points[points.length - 1];
         var sc = screenScale();
         if ((last.x - local.x) * (last.x - local.x) + (last.y - local.y) * (last.y - local.y) >= 1 / (sc * sc))
@@ -1802,9 +1890,22 @@ class AnimatorState extends QOLEditorState
       case 'pixmove':
         movePixels(local);
       case 'shape':
-        drawLiveShape(toLocal(cDragX, cDragY), local);
+        drawLiveShape(snapLocal(toLocal(cDragX, cDragY)), snapLocal(local));
       case 'campan' | 'camrotate':
         cameraDrag(mx, my);
+      case 'edge' | 'subanchor' | 'subcontrol':
+        reshapeDrag(local);
+      case 'lasso':
+        var last = lassoPts.length >= 2 ? toScreen(lassoPts[lassoPts.length - 2], lassoPts[lassoPts.length - 1]) : null;
+        if (last == null || Math.abs(last.x - mx) + Math.abs(last.y - my) > 3)
+        {
+          lassoPts.push(local.x);
+          lassoPts.push(local.y);
+        }
+      case 'pen':
+        penDrag(snapLocal(local));
+      case 'rotview':
+        rotviewDrag(mx, my);
       default:
     }
   }
@@ -1833,12 +1934,21 @@ class AnimatorState extends QOLEditorState
         lastErase = null;
         doc.changed();
       case 'shape':
-        finishShape(toLocal(cDragX, cDragY), local);
+        finishShape(snapLocal(toLocal(cDragX, cDragY)), snapLocal(local));
       case 'campan' | 'camrotate':
         camKey = null;
         if (cDragMoved) doc.changed();
         else
           doc.dropCheckpoint();
+      case 'edge' | 'subanchor' | 'subcontrol':
+        reshapeUp();
+      case 'lasso':
+        lassoUp();
+      case 'zoombox':
+        zoomBoxUp(mx, my);
+      case 'rotview':
+        if (!cDragMoved && haxe.Timer.stamp() - lastRotClick < 0.35) rotateView(0, true);
+        lastRotClick = haxe.Timer.stamp();
       default:
     }
     liveShape.graphics.clear();
@@ -2339,7 +2449,7 @@ class AnimatorState extends QOLEditorState
   // Select / transform
   //
 
-  function selectDown(mx:Float, my:Float, local:Point):Void
+  function selectDown(mx:Float, my:Float, local:Point, edges:Bool):Void
   {
     // Selected pixels on a paint layer: drag them (Alt drags a copy).
     if (pixSel != null && pixContains(local))
@@ -2376,7 +2486,25 @@ class AnimatorState extends QOLEditorState
       }
     }
 
+    // Dragging the edge or corner of a shape that isn't selected reshapes it (Animate's Selection tool).
+    if (edges && !FlxG.keys.pressed.SHIFT)
+    {
+      var et = edgeTarget(mx, my);
+      if (et != null)
+      {
+        startReshape('edge', et.sel, et.anchor, et.edge);
+        return;
+      }
+    }
+
     var hit = hitTest();
+    if (hit == null && haxe.Timer.stamp() - lastEmptyClick < 0.35 && editPath.length > 0)
+    {
+      // Double-clicking an empty spot goes back up out of the symbol.
+      lastEmptyClick = 0;
+      exitSymbol(false);
+      return;
+    }
     if (hit != null)
     {
       var now = haxe.Timer.stamp();
@@ -2399,11 +2527,15 @@ class AnimatorState extends QOLEditorState
       {
         selection = [hit];
       }
+      expandGroups();
       curLayer = hit.layer;
       refreshProps();
       beginTransform('move', selectionBounds(), -1);
+      // Alt+drag drags a copy (Animate).
+      altCopy = FlxG.keys.pressed.ALT;
       return;
     }
+    lastEmptyClick = haxe.Timer.stamp();
     if (!FlxG.keys.pressed.SHIFT) selection = [];
     refreshProps();
     // On a paint layer, the box selects pixels.
@@ -2464,6 +2596,7 @@ class AnimatorState extends QOLEditorState
       transformCheckpointed = true;
       // Editing between keyframes of a tween adds a keyframe here (like Animate does).
       autoKeyframes();
+      if (drag == 'move' && altCopy) duplicateInPlace();
       // A new keyframe may have been made: start from its (tweened) state.
       dragOrig = [for (o in dragOrig) {sel: o.sel, m: elementOf(o.sel) != null ? AnimGeom.matrixOf(elementOf(o.sel)) : o.m}];
     }
@@ -2480,6 +2613,14 @@ class AnimatorState extends QOLEditorState
           if (Math.abs(dx) > Math.abs(dy)) dy = 0;
           else
             dx = 0;
+        }
+        if (snapGrid)
+        {
+          // The selection's corner lands on the grid.
+          var g = gridSize;
+          var sx = bb.x + symOffsetX() + dx, sy = bb.y + symOffsetY() + dy;
+          dx += Math.round(sx / g) * g - sx;
+          dy += Math.round(sy / g) * g - sy;
         }
         t.translate(dx, dy);
       case 'scale':
@@ -2981,6 +3122,15 @@ class AnimatorState extends QOLEditorState
       region.push(c.x);
       region.push(c.y);
     }
+    regionSelect(region);
+  }
+
+  /**
+   * Select what's inside an outline (the marquee box or the Lasso): whole items it touches, and just the part of a
+   * shape that's inside (the shape is cut in two so that part can be moved on its own). Groups are taken whole.
+   */
+  function regionSelect(region:Array<Float>):Void
+  {
     var r = AnimCut.polyBounds(region);
     var checkpointed = false;
     for (li in 0...sym.layers.length)
@@ -2999,7 +3149,7 @@ class AnimatorState extends QOLEditorState
           i--;
           continue;
         }
-        if (el.type == 'shape' && el.paths != null && (key.tween == null || frame == key.start))
+        if (el.type == 'shape' && el.paths != null && el.group == null && (key.tween == null || frame == key.start))
         {
           var parts = AnimCut.split(el, region);
           if (parts.inside.length > 0)
@@ -3042,6 +3192,7 @@ class AnimatorState extends QOLEditorState
       renderDirty = true;
       doc.changed();
     }
+    expandGroups();
     if (selection.length > 0) curLayer = selection[0].layer;
     refreshProps();
   }
@@ -3263,6 +3414,13 @@ class AnimatorState extends QOLEditorState
       var s = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
       x1 = x0 + s * (x1 < x0 ? -1 : 1);
       y1 = y0 + s * (y1 < y0 ? -1 : 1);
+    }
+    // Alt draws from the middle (Animate).
+    if (FlxG.keys.pressed.ALT && (tool == 'rect' || tool == 'oval'))
+    {
+      var cx = x0, cy = y0;
+      x0 = cx - (x1 - cx);
+      y0 = cy - (y1 - cy);
     }
     return switch (tool)
     {
@@ -3522,7 +3680,7 @@ class AnimatorState extends QOLEditorState
     setStatus('Copied ${els.length} item(s).');
   }
 
-  function pasteSelection():Void
+  function pasteSelection(inPlace:Bool = false):Void
   {
     if (pastePixels()) return;
     if (clipboard == null) return;
@@ -3539,8 +3697,11 @@ class AnimatorState extends QOLEditorState
     selection = [];
     for (el in els)
     {
-      el.tx += 10;
-      el.ty += 10;
+      if (!inPlace)
+      {
+        el.tx += 10;
+        el.ty += 10;
+      }
       key.elements.push(el);
       selection.push({layer: curLayer, element: key.elements.length - 1});
     }
@@ -4425,7 +4586,7 @@ class AnimatorState extends QOLEditorState
         deletePixels();
       });
       addMenuItem(menu, 'Copy', 'Ctrl+C', copyPixels);
-      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
+      addMenuItem(menu, 'Paste', 'Ctrl+V', () -> pasteSelection());
       addMenuItem(menu, 'Delete', 'Delete', deletePixels);
       addMenuSeparator(menu);
       addMenuItem(menu, 'Convert to Symbol...', 'F8', pixelsToSymbol);
@@ -4438,11 +4599,8 @@ class AnimatorState extends QOLEditorState
         deleteSelection();
       });
       addMenuItem(menu, 'Copy', 'Ctrl+C', copySelection);
-      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
-      addMenuItem(menu, 'Duplicate', null, () -> {
-        copySelection();
-        pasteSelection();
-      });
+      addMenuItem(menu, 'Paste', 'Ctrl+V', () -> pasteSelection());
+      addMenuItem(menu, 'Duplicate', 'Ctrl+D', duplicateSelection);
       addMenuItem(menu, 'Delete', 'Delete', deleteSelection);
       addMenuSeparator(menu);
       addMenuItem(menu, 'Convert to Symbol...', 'F8', convertToSymbol);
@@ -4452,6 +4610,8 @@ class AnimatorState extends QOLEditorState
         addMenuItem(menu, 'Edit Symbol', 'Double-click', () -> enterSymbol(id));
         addMenuItem(menu, 'Break Apart', 'Ctrl+B', breakApart);
       }
+      if (selection.length > 1) addMenuItem(menu, 'Group', 'Ctrl+G', groupSelection);
+      if (el?.group != null || Lambda.exists(selection, s -> elementOf(s)?.group != null)) addMenuItem(menu, 'Ungroup', 'Ctrl+Shift+G', ungroupSelection);
       addMenuSeparator(menu);
       var arr = addSubMenu(menu, 'Arrange');
       addMenuItem(arr, 'Bring to Front', 'Ctrl+Shift+Up', () -> arrange(99999));
@@ -4463,13 +4623,22 @@ class AnimatorState extends QOLEditorState
       addMenuItem(tr, 'Flip Vertical', null, () -> transformSelection(m -> m.scale(1, -1)));
       addMenuItem(tr, 'Rotate 90 Clockwise', null, () -> transformSelection(m -> m.rotate(Math.PI / 2)));
       addMenuItem(tr, 'Rotate 90 Counter-Clockwise', null, () -> transformSelection(m -> m.rotate(-Math.PI / 2)));
+      addMenuItem(tr, 'Scale and Rotate...', 'Ctrl+Alt+S', scaleRotateDialog);
+      addMenuItem(tr, 'Remove Transform', 'Ctrl+Shift+Z', removeTransform);
+      var al = addSubMenu(menu, 'Align');
+      addMenuItem(al, 'Left', 'Ctrl+Alt+1', () -> alignSelection('left'));
+      addMenuItem(al, 'Horizontal Center', 'Ctrl+Alt+2', () -> alignSelection('hcenter'));
+      addMenuItem(al, 'Right', 'Ctrl+Alt+3', () -> alignSelection('right'));
+      addMenuItem(al, 'Top', 'Ctrl+Alt+4', () -> alignSelection('top'));
+      addMenuItem(al, 'Vertical Center', 'Ctrl+Alt+5', () -> alignSelection('vcenter'));
+      addMenuItem(al, 'Bottom', 'Ctrl+Alt+6', () -> alignSelection('bottom'));
       addMenuSeparator(menu);
       addMenuItem(menu, 'Create Classic Tween', null, () -> setTween(true));
       addMenuItem(menu, 'Select All', 'Ctrl+A', selectAll);
     }
     else
     {
-      addMenuItem(menu, 'Paste', 'Ctrl+V', pasteSelection);
+      addMenuItem(menu, 'Paste', 'Ctrl+V', () -> pasteSelection());
       addMenuItem(menu, 'Select All', 'Ctrl+A', selectAll);
       addMenuSeparator(menu);
       addMenuItem(menu, 'Insert Keyframe', 'F6', () -> insertKeyframe(false));
@@ -4611,11 +4780,14 @@ class AnimatorState extends QOLEditorState
         b.removeClass(cls);
       b.icon = on ? AnimatorSkin.icon(tid, 22, 0xFFFFFFFF) : AnimatorSkin.icon(tid, 22, AnimatorSkin.TOOL_COLORS.get(tid));
     }
-    if (id != 'select')
+    if (!selectsThings(id))
     {
       selection = [];
       commitPixels();
     }
+    if (id != 'pen' && penPts.length > 0) finishPen(false);
+    if (id != 'subselect') subSel = null;
+    lassoPts = [];
     if (changed && !quiet && decor != null)
     {
       var t = Lambda.find(TOOLS, t -> t.id == id);
@@ -4657,7 +4829,7 @@ class AnimatorState extends QOLEditorState
     {
       buildAudioProps(form, layer);
     }
-    else if (selection.length > 0 && tool == 'select')
+    else if (selection.length > 0 && selectsThings(tool))
     {
       buildElementProps(form);
     }
@@ -4770,10 +4942,31 @@ class AnimatorState extends QOLEditorState
         form.slider('Size', () -> textSize, v -> textSize = v, 6, 200, 1);
         form.note('Click the stage to add text (Fill color).');
       case 'picker':
-        form.note('Click to pick the Fill color, Alt+click for the Stroke color.');
+        form.note('Click a fill to pick the Fill color (then the Paint Bucket), a line for the Stroke color (then the Ink Bottle). Alt+click always picks the Stroke color.');
+      case 'zoom':
+        form.note('Click to zoom in, Alt+click to zoom out, drag a box to zoom into it.');
       case 'select':
-        form.note('Click to select (Shift adds), drag to move, drag the handles to scale, just outside a corner to rotate. '
-          + 'Double-click a symbol to edit it. F8 makes a symbol.');
+        form.note('Click to select (Shift adds), drag to move (Alt drags a copy), drag the handles to scale, just outside a corner to rotate. '
+          + 'Drag the edge of a shape to bend it, its corner to move it, Ctrl+drag an edge to add a corner. '
+          + 'Double-click a symbol to edit it. F8 makes a symbol, Ctrl+G groups.');
+      case 'subselect':
+        form.note('Click a shape to see its points. Drag a point to move it, or a round handle to change the curve.');
+      case 'transform':
+        form.note('Select and transform: drag the handles to scale (Shift keeps the shape, Alt scales from the middle), '
+          + 'just outside a corner to rotate.');
+      case 'lasso':
+        form.note('Draw around what you want: the parts of shapes inside are selected (on paint layers, the pixels are lifted). '
+          + 'Drag the selection to move it.');
+      case 'pen':
+        form.check('Fill (closed shapes)', () -> fillOn, v -> fillOn = v);
+        form.check('Outline', () -> strokeOn, v -> strokeOn = v);
+        form.slider('Line width', () -> shapeStroke, v -> shapeStroke = v, 0.5, 40, 0.5);
+        form.note('Click for corners, drag for curves. Click the first point to close the shape; double-click, Enter or Ctrl+click to end an open line.');
+      case 'ink':
+        form.slider('Line width', () -> shapeStroke, v -> shapeStroke = v, 0.5, 40, 0.5);
+        form.note('Click a line to give it the Stroke color and this width, or a fill to give it an outline.');
+      case 'rotview':
+        form.note('Drag to turn the view (Shift snaps to 15 degrees). Double-click to straighten it. The drawing doesn\'t change.');
       default:
         form.note('Space + drag or the middle mouse button pans anywhere; Ctrl + wheel zooms.');
     }
@@ -4952,49 +5145,143 @@ class AnimatorState extends QOLEditorState
   {
     var k = FlxG.keys;
     var c = ctrl();
+    var shift = k.pressed.SHIFT, alt = k.pressed.ALT;
     if (c)
     {
-      if (k.justPressed.Z) k.pressed.SHIFT ? redo() : undo();
+      // Adobe Animate's shortcuts (Windows; Command instead of Ctrl on a Mac).
+      if (k.justPressed.Z) shift ? removeTransform() : undo();
       if (k.justPressed.Y) redo();
-      if (k.justPressed.C && k.pressed.ALT) copyFrames();
-      else if (k.justPressed.C) copySelection();
-      if (k.justPressed.V && k.pressed.ALT) pasteFrames();
-      else if (k.justPressed.V) pasteSelection();
+      if (k.justPressed.C)
+      {
+        if (alt) copyFrames();
+        else
+          copySelection();
+      }
+      if (k.justPressed.V)
+      {
+        if (alt) pasteFrames();
+        else
+          pasteSelection(shift);
+      }
       if (k.justPressed.X)
       {
-        copySelection();
-        deleteSelection();
+        if (alt) cutFrames();
+        else
+        {
+          copySelection();
+          deleteSelection();
+        }
       }
-      if (k.justPressed.A) selectAll();
-      if (k.justPressed.B) breakApart();
-      if (k.justPressed.N) newDocDialog();
-      if (k.justPressed.O) openDialog();
-      if (k.justPressed.ZERO) fitView();
-      if (k.justPressed.ONE)
+      if (k.justPressed.A)
       {
-        zoom = 1;
-        centerStage();
+        if (alt) selectAllFrames();
+        else if (shift) deselectAll();
+        else
+          selectAll();
+      }
+      if (k.justPressed.B) breakApart();
+      if (k.justPressed.D) duplicateSelection();
+      if (k.justPressed.G)
+      {
+        if (alt) gridDialog();
+        else if (shift) ungroupSelection();
+        else
+          groupSelection();
+      }
+      if (k.justPressed.E) editSymbolToggle();
+      if (k.justPressed.N) newDocDialog();
+      if (k.justPressed.O)
+      {
+        if (alt && shift)
+        {
+          allOutlines = !allOutlines;
+          renderDirty = true;
+        }
+        else if (!alt && !shift) openDialog();
+      }
+      if (k.justPressed.S && shift && alt) AnimExport.videoDialog(this);
+      else if (k.justPressed.S && shift) saveAsDialog();
+      else if (k.justPressed.S && alt) scaleRotateDialog();
+      if (k.justPressed.R) importToStage();
+      if (k.justPressed.K && alt && shift) shortcutsDialog();
+      else if (k.justPressed.K) alignDialog();
+      if (k.justPressed.H) hideEdges = !hideEdges;
+      if (k.justPressed.L) showTab(1);
+      if (k.justPressed.J) showTab(2);
+      if (k.justPressed.T) showTab(0);
+      if (k.justPressed.F3) showTab(0);
+      if (k.justPressed.F8) newSymbol();
+      if (k.justPressed.W) exitEditor();
+      if (k.justPressed.ENTER) testMovie();
+      if (k.justPressed.QUOTE)
+      {
+        if (shift) snapGrid = !snapGrid;
+        else
+          showGrid = !showGrid;
+        setStatus(shift ? 'Snap to grid ${snapGrid ? 'on' : 'off'}.' : 'Grid ${showGrid ? 'shown' : 'hidden'}.');
+      }
+      if (alt && !shift)
+      {
+        // Align (Ctrl+Alt+1..9).
+        if (k.justPressed.ONE) alignSelection('left');
+        if (k.justPressed.TWO) alignSelection('hcenter');
+        if (k.justPressed.THREE) alignSelection('right');
+        if (k.justPressed.FOUR) alignSelection('top');
+        if (k.justPressed.FIVE) alignSelection('vcenter');
+        if (k.justPressed.SIX) alignSelection('bottom');
+        if (k.justPressed.SEVEN) distributeSelection(true);
+        if (k.justPressed.NINE) distributeSelection(false);
+        if (k.justPressed.EIGHT)
+        {
+          alignToStage = !alignToStage;
+          setStatus('Align to stage ${alignToStage ? 'on' : 'off'}.');
+        }
+        return;
+      }
+      if (shift && k.justPressed.NINE) transformSelection(m -> m.rotate(Math.PI / 2));
+      if (shift && k.justPressed.SEVEN) transformSelection(m -> m.rotate(-Math.PI / 2));
+      if (!shift)
+      {
+        if (k.justPressed.ZERO) fitView();
+        if (k.justPressed.ONE) zoomTo(1);
+        if (k.justPressed.TWO) fitView();
+        if (k.justPressed.THREE) showAll();
+        if (k.justPressed.FOUR) zoomTo(4);
+        if (k.justPressed.EIGHT) zoomTo(8);
       }
       if (k.justPressed.PLUS) zoomAt(1.25, centerX(), centerY());
       if (k.justPressed.MINUS) zoomAt(0.8, centerX(), centerY());
-      if (k.justPressed.UP) arrange(k.pressed.SHIFT ? 99999 : 1);
-      if (k.justPressed.DOWN) arrange(k.pressed.SHIFT ? -99999 : -1);
+      if (k.justPressed.UP) arrange(shift ? 99999 : 1);
+      if (k.justPressed.DOWN) arrange(shift ? -99999 : -1);
       return;
     }
-    if (k.justPressed.F5) k.pressed.SHIFT ? removeFrames() : insertFrames(1);
-    if (k.justPressed.F6) k.pressed.SHIFT ? clearKeyframe() : insertKeyframe(false);
-    if (k.justPressed.F7) insertKeyframe(true);
+    // The Pen: Enter finishes an open line.
+    if (penPts.length > 0 && k.justPressed.ENTER)
+    {
+      finishPen(false);
+      return;
+    }
+    if (alt && shift && k.justPressed.O)
+    {
+      onion = !onion;
+      renderDirty = true;
+      return;
+    }
+    if (k.justPressed.F4) togglePanels();
+    if (k.justPressed.F5) shift ? removeFrames() : insertFrames(Std.int(Math.max(1, Math.abs(selEnd - selStart) + 1)));
+    if (k.justPressed.F6) shift ? clearKeyframe() : insertKeyframes(false);
+    if (k.justPressed.F7) insertKeyframes(true);
     if (k.justPressed.F8) convertToSymbol();
     if (k.justPressed.ENTER) togglePlay();
-    if (k.justPressed.COMMA) setFrame(Std.int(Math.max(0, frame - 1)));
-    if (k.justPressed.PERIOD) setFrame(frame + 1);
+    if (k.justPressed.COMMA) shift ? setFrame(0) : setFrame(Std.int(Math.max(0, frame - 1)));
+    if (k.justPressed.PERIOD) shift ? setFrame(AnimData.symbolLength(sym) - 1) : setFrame(frame + 1);
     if (k.justPressed.HOME) setFrame(0);
     if (k.justPressed.END) setFrame(AnimData.symbolLength(sym) - 1);
     if (k.justPressed.DELETE || k.justPressed.BACKSPACE) deleteSelection();
-    if (k.justPressed.X) swapColors();
+    if (k.justPressed.X && !alt && !shift) swapColors();
     if (k.justPressed.LBRACKET) adjustSize(-1);
     if (k.justPressed.RBRACKET) adjustSize(1);
-    var step = k.pressed.SHIFT ? 10 : 1;
+    var step = shift ? 10 : 1;
     if (pixSel != null)
     {
       if (k.justPressed.LEFT) nudgePixels(-step, 0);
@@ -5009,15 +5296,1478 @@ class AnimatorState extends QOLEditorState
       if (k.justPressed.UP) nudge(0, -step);
       if (k.justPressed.DOWN) nudge(0, step);
     }
-    if (!k.pressed.SPACE)
+    if (!k.pressed.SPACE && !alt)
     {
+      if (k.justPressed.C && !shift) cameraTool();
       for (t in TOOLS)
-        if (k.anyJustPressed([flixel.input.keyboard.FlxKey.fromString(t.key)])) setTool(t.id);
+      {
+        if (t.key == '') continue;
+        var wantShift = StringTools.startsWith(t.key, 'Shift+');
+        var name = wantShift ? t.key.substr(6) : t.key;
+        if (wantShift != shift) continue;
+        if (k.anyJustPressed([flixel.input.keyboard.FlxKey.fromString(name)])) setTool(t.id);
+      }
+      // Animate tools the Animator doesn't have.
+      var missing = [
+        'F' => 'Gradient Transform', 'W' => 'Asset Warp', 'M' => 'Bone', 'U' => 'Width', 'G' => '3D Translation', 'J' => 'Object Drawing',
+        'D' => 'Deco'
+      ];
+      if (!shift) for (key => name in missing)
+        if (k.anyJustPressed([flixel.input.keyboard.FlxKey.fromString(key)])) setStatus('Animate\'s $name isn\'t in the QOL Animator yet.');
     }
+  }
+
+  function showTab(i:Int):Void
+  {
+    if (tabs == null) return;
+    if (inspector != null && inspector.collapsed)
+    {
+      inspector.collapsed = false;
+      layoutPanels();
+    }
+    tabs.pageIndex = i;
+  }
+
+  function saveAsDialog():Void
+  {
+    prompt('Save As', 'Animation name', doc.project.name, n -> {
+      if (n == null || n == '') return;
+      doc.project.name = n;
+      doSave();
+    });
+  }
+
+  //
+  // Adobe Animate tools and behaviours
+  //
+
+  var altCopy:Bool = false;
+  var hideEdges:Bool = false;
+  public var showGrid:Bool = false;
+  public var snapGrid:Bool = false;
+  public var gridSize:Float = 10;
+  public var alignToStage:Bool = false;
+  var gridShape:Null<Shape> = null;
+  var gridKey:String = '';
+  var lastRotClick:Float = 0;
+  var rotStartAngle:Float = 0;
+  var rotStartView:Float = 0;
+  var testing:Bool = false;
+  var panelStates:Null<Array<Bool>> = null;
+
+  /**
+   * Ctrl (Command on Mac) held with a drawing tool: the Selection tool works until it's let go.
+   */
+  function tempSelect():Bool
+    return ctrl() && !selectsThings(tool) && tool != 'hand' && tool != 'zoom' && tool != 'rotview' && drag == '';
+
+  /**
+   * A point moved onto the grid when Snap to Grid is on (the grid is in stage coordinates).
+   */
+  function snapLocal(p:Point):Point
+  {
+    if (!snapGrid) return p;
+    var ox = symOffsetX(), oy = symOffsetY();
+    return new Point(Math.round((p.x + ox) / gridSize) * gridSize - ox, Math.round((p.y + oy) / gridSize) * gridSize - oy);
+  }
+
+  /**
+   * Add the rest of each selected item's group to the selection.
+   */
+  function expandGroups():Void
+  {
+    var extra:Array<AnimSel> = [];
+    for (s in selection)
+    {
+      var el = elementOf(s);
+      if (el == null || el.group == null) continue;
+      var key = AnimData.keyAt(sym.layers[s.layer], frame);
+      if (key == null) continue;
+      for (i in 0...key.elements.length)
+      {
+        if (key.elements[i].group != el.group) continue;
+        if (Lambda.exists(selection, o -> o.layer == s.layer && o.element == i) || Lambda.exists(extra, o -> o.layer == s.layer && o.element == i)) continue;
+        extra.push({layer: s.layer, element: i});
+      }
+    }
+    for (e in extra)
+      selection.push(e);
+  }
+
+  /**
+   * Alt+drag: the selected items are copied, and the copies are what moves.
+   */
+  function duplicateInPlace():Void
+  {
+    var copies:Array<AnimSel> = [];
+    var groupIds = new Map<String, String>();
+    for (s in selection)
+    {
+      var key = AnimData.keyAt(sym.layers[s.layer], frame);
+      var el = key?.elements[s.element];
+      if (el == null) continue;
+      var c:AnimElement = AnimData.copy(el);
+      if (c.group != null)
+      {
+        if (!groupIds.exists(c.group)) groupIds.set(c.group, AnimData.makeId('grp'));
+        c.group = groupIds.get(c.group);
+      }
+      key.elements.push(c);
+      copies.push({layer: s.layer, element: key.elements.length - 1});
+    }
+    selection = copies;
+    dragOrig = [for (s in selection) {sel: s, m: AnimGeom.matrixOf(elementOf(s))}];
+    renderDirty = true;
+  }
+
+  //
+  // Reshaping (Selection tool on edges, Subselection tool on points)
+  //
+
+  var subSel:Null<AnimSel> = null;
+  var reshapeSel:Null<AnimSel> = null;
+  var reshapeOrig:Null<Array<AnimPath>> = null;
+  var reshapeAnchor:Null<{x:Float, y:Float}> = null;
+  var reshapeEdge:Null<{seg:AnimEdit.AnimSeg, t:Float, dist:Float}> = null;
+  var reshapeCorner:Bool = false;
+  var reshapeStarted:Bool = false;
+  var hoverReshape:String = '';
+  var hoverKey:String = '';
+
+  /**
+   * Drawing coordinates -> the element's own, and how many screen pixels one of its units is.
+   */
+  function intoElement(el:AnimElement, local:Point):{p:Point, scale:Float}
+  {
+    var m = AnimGeom.matrixOf(el);
+    var det = Math.abs(m.a * m.d - m.b * m.c);
+    m.invert();
+    return {p: m.transformPoint(local), scale: screenScale() * Math.sqrt(Math.max(1e-6, det))};
+  }
+
+  /**
+   * Whether an element's shape can be reshaped right now (on its keyframe, not tweening, not grouped).
+   */
+  function reshapeable(s:AnimSel):Bool
+  {
+    var layer = sym.layers[s.layer];
+    if (layer == null || layer.kind != 'vector' || AnimData.isLocked(sym, s.layer) || AnimData.isHidden(sym, s.layer)) return false;
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null || (key.tween != null && key.start != frame)) return false;
+    var el = key.elements[s.element];
+    return el != null && el.type == 'shape' && el.paths != null && el.group == null;
+  }
+
+  /**
+   * The unselected shape whose corner or edge is under the mouse, top first.
+   */
+  function edgeTarget(mx:Float, my:Float):Null<{sel:AnimSel, anchor:Null<{x:Float, y:Float}>, edge:Null<{seg:AnimEdit.AnimSeg, t:Float, dist:Float}>}>
+  {
+    var local = toLocal(mx, my);
+    var hits = renderer.hits.copy();
+    hits.reverse();
+    for (h in hits)
+    {
+      var s:AnimSel = {layer: h.layer, element: h.element};
+      if (Lambda.exists(selection, o -> o.layer == s.layer && o.element == s.element)) continue;
+      if (!reshapeable(s)) continue;
+      var el = elementOf(s);
+      var inv = intoElement(el, local);
+      var tol = 6 / inv.scale;
+      // Quick reject with the drawn bounds.
+      var bb = h.obj.getBounds(contentHolder);
+      var lx = local.x + symOffsetX(), ly = local.y + symOffsetY();
+      var pad = 8 / screenScale();
+      if (lx < bb.x - pad || lx > bb.right + pad || ly < bb.y - pad || ly > bb.bottom + pad) continue;
+      var a = AnimEdit.nearestAnchor(el.paths, inv.p.x, inv.p.y, tol * 0.75);
+      if (a != null) return {sel: s, anchor: a, edge: null};
+      var e = AnimEdit.nearestEdge(el.paths, inv.p.x, inv.p.y, tol);
+      if (e != null) return {sel: s, anchor: null, edge: e};
+    }
+    return null;
+  }
+
+  function startReshape(mode:String, sel:AnimSel, anchor:Null<{x:Float, y:Float}>, edge:Null<{seg:AnimEdit.AnimSeg, t:Float, dist:Float}>):Void
+  {
+    var el = elementOf(sel);
+    if (el == null) return;
+    drag = mode;
+    reshapeSel = sel;
+    reshapeOrig = AnimEdit.copyPaths(el.paths);
+    reshapeAnchor = anchor;
+    reshapeEdge = edge;
+    // Ctrl+drag (or Alt+drag) on an edge adds a corner, like Animate.
+    reshapeCorner = ctrl() || FlxG.keys.pressed.ALT;
+    reshapeStarted = false;
+  }
+
+  function reshapeDrag(local:Point):Void
+  {
+    if (!cDragMoved || reshapeSel == null || reshapeOrig == null) return;
+    var el = elementOf(reshapeSel);
+    if (el == null) return;
+    if (!reshapeStarted)
+    {
+      doc.checkpoint();
+      reshapeStarted = true;
+    }
+    var p = intoElement(el, snapLocal(local)).p;
+    var paths = AnimEdit.copyPaths(reshapeOrig);
+    switch (drag)
+    {
+      case 'subcontrol':
+        if (reshapeAnchor != null) AnimEdit.moveControl(paths, reshapeAnchor.x, reshapeAnchor.y, p.x, p.y);
+      default:
+        if (reshapeAnchor != null) AnimEdit.moveAnchor(paths, reshapeAnchor.x, reshapeAnchor.y, p.x, p.y);
+        else if (reshapeEdge != null)
+        {
+          if (reshapeCorner) AnimEdit.addCorner(paths, reshapeEdge.seg, reshapeEdge.t, p.x, p.y);
+          else
+            AnimEdit.bend(paths, reshapeEdge.seg, reshapeEdge.t, p.x, p.y);
+        }
+    }
+    el.paths = paths;
+    renderDirty = true;
+    dirty = true;
+  }
+
+  function reshapeUp():Void
+  {
+    if (reshapeStarted)
+    {
+      doc.changed();
+      // Subselection points stay shown on the reshaped shape.
+    }
+    else if (drag == 'edge' && reshapeSel != null)
+    {
+      // A click without dragging just selects the shape.
+      selection = [reshapeSel];
+      expandGroups();
+      curLayer = reshapeSel.layer;
+      refreshProps();
+    }
+    reshapeSel = null;
+    reshapeOrig = null;
+    reshapeAnchor = null;
+    reshapeEdge = null;
+    reshapeStarted = false;
+  }
+
+  /**
+   * Subselection tool: click a shape to show its points; drag a point or a curve handle to move it.
+   */
+  function subselectDown(mx:Float, my:Float, local:Point):Void
+  {
+    if (subSel != null && reshapeable(subSel))
+    {
+      var el = elementOf(subSel);
+      var inv = intoElement(el, local);
+      var tol = 7 / inv.scale;
+      var c = AnimEdit.nearestControl(el.paths, inv.p.x, inv.p.y, tol);
+      if (c != null)
+      {
+        startReshape('subcontrol', subSel, c, null);
+        return;
+      }
+      var a = AnimEdit.nearestAnchor(el.paths, inv.p.x, inv.p.y, tol);
+      if (a != null)
+      {
+        startReshape('subanchor', subSel, a, null);
+        return;
+      }
+    }
+    var hit = hitTest();
+    if (hit != null && reshapeable(hit))
+    {
+      subSel = hit;
+      selection = [];
+      curLayer = hit.layer;
+      refreshProps();
+      return;
+    }
+    subSel = null;
+    if (hit != null)
+    {
+      // Anything else is selected and dragged whole.
+      selection = [hit];
+      expandGroups();
+      curLayer = hit.layer;
+      refreshProps();
+      beginTransform('move', selectionBounds(), -1);
+      return;
+    }
+    selection = [];
+    refreshProps();
+    drag = 'marquee';
+  }
+
+  //
+  // Lasso
+  //
+
+  var lassoPts:Array<Float> = [];
+
+  function lassoDown(mx:Float, my:Float, local:Point):Void
+  {
+    // Inside the current selection: drag it.
+    var b = selectionBounds();
+    if ((pixSel != null && pixContains(local)) || (b != null && b.contains(local.x, local.y)))
+    {
+      selectDown(mx, my, local, false);
+      return;
+    }
+    commitPixels();
+    if (!FlxG.keys.pressed.SHIFT) selection = [];
+    lassoPts = [local.x, local.y];
+    drag = 'lasso';
+  }
+
+  function lassoUp():Void
+  {
+    var pts = lassoPts;
+    lassoPts = [];
+    if (pts.length < 6) return;
+    var layer = currentLayer();
+    if (layer != null && layer.kind == 'bitmap' && !AnimData.isLocked(sym, curLayer) && layer.visible) lassoPixels(pts);
+    else
+      regionSelect(pts);
+  }
+
+  /**
+   * Lasso on a paint layer: the pixels inside the outline are lifted off the canvas, ready to move.
+   */
+  function lassoPixels(poly:Array<Float>):Void
+  {
+    var layer = currentLayer();
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null || doc.getBitmap(key.bitmap) == null) return;
+    var r = AnimCut.polyBounds(poly);
+    var src = doc.getBitmap(key.bitmap);
+    var cx = key.bx ?? 0, cy = key.by ?? 0;
+    var x0 = Std.int(Math.max(Math.floor(r.x), cx)), y0 = Std.int(Math.max(Math.floor(r.y), cy));
+    var x1 = Std.int(Math.min(Math.ceil(r.right), cx + src.width)), y1 = Std.int(Math.min(Math.ceil(r.bottom), cy + src.height));
+    var w = x1 - x0, h = y1 - y0;
+    if (w < 1 || h < 1) return;
+    doc.checkpoint();
+    var canvas = doc.editableBitmap(key);
+    function outline(ox:Float, oy:Float):Shape
+    {
+      var sh = new Shape();
+      var g = sh.graphics;
+      g.beginFill(0xFFFFFF, 1);
+      g.moveTo(poly[0] - ox, poly[1] - oy);
+      var i = 2;
+      while (i < poly.length)
+      {
+        g.lineTo(poly[i] - ox, poly[i + 1] - oy);
+        i += 2;
+      }
+      g.endFill();
+      return sh;
+    }
+    var mask = new BitmapData(w, h, true, 0);
+    mask.draw(outline(x0, y0));
+    var float = new BitmapData(w, h, true, 0);
+    float.copyPixels(canvas, new Rectangle(x0 - cx, y0 - cy, w, h), new Point(0, 0), mask, new Point(0, 0), false);
+    mask.dispose();
+    canvas.draw(outline(cx, cy), null, null, BlendMode.ERASE);
+    pixSel = {
+      layer: curLayer,
+      key: key,
+      x: x0,
+      y: y0,
+      w: w,
+      h: h,
+      float: float,
+      fx: x0,
+      fy: y0
+    };
+    renderDirty = true;
+    dirty = true;
+    setStatus('Pixels lifted: drag to move them, Delete clears them, Ctrl+C copies, F8 makes a symbol.');
+  }
+
+  //
+  // Pen
+  //
+
+  var penPts:Array<{x:Float, y:Float, hx:Float, hy:Float, smooth:Bool}> = [];
+  var lastPenClick:Float = 0;
+
+  function penDown(mx:Float, my:Float, local:Point):Void
+  {
+    var layer = currentLayer();
+    if (layer == null || layer.kind == 'folder' || layer.kind == 'camera' || layer.kind == 'audio') return;
+    var now = haxe.Timer.stamp();
+    if (penPts.length > 0)
+    {
+      var first = toScreen(penPts[0].x, penPts[0].y);
+      var last = toScreen(penPts[penPts.length - 1].x, penPts[penPts.length - 1].y);
+      // Clicking the first point closes the shape; double-clicking the last one ends an open line.
+      if (penPts.length >= 2 && Math.abs(first.x - mx) < 8 && Math.abs(first.y - my) < 8)
+      {
+        finishPen(true);
+        return;
+      }
+      if (now - lastPenClick < 0.35 && Math.abs(last.x - mx) < 8 && Math.abs(last.y - my) < 8)
+      {
+        finishPen(false);
+        return;
+      }
+    }
+    lastPenClick = now;
+    penPts.push({x: local.x, y: local.y, hx: local.x, hy: local.y, smooth: false});
+    drag = 'pen';
+  }
+
+  /**
+   * Dragging while placing a point pulls out its curve handles.
+   */
+  function penDrag(local:Point):Void
+  {
+    if (penPts.length == 0 || !cDragMoved) return;
+    var p = penPts[penPts.length - 1];
+    p.hx = local.x;
+    p.hy = local.y;
+    p.smooth = Math.abs(p.hx - p.x) + Math.abs(p.hy - p.y) > 0.5;
+  }
+
+  function penSegment(d:Array<Float>, a:{x:Float, y:Float, hx:Float, hy:Float, smooth:Bool}, b:{x:Float, y:Float, hx:Float, hy:Float, smooth:Bool}):Void
+  {
+    if (!a.smooth && !b.smooth)
+    {
+      d.push(1);
+      d.push(b.x);
+      d.push(b.y);
+      return;
+    }
+    // The incoming handle mirrors the outgoing one.
+    var c1x = a.smooth ? a.hx : a.x, c1y = a.smooth ? a.hy : a.y;
+    var c2x = b.smooth ? 2 * b.x - b.hx : b.x, c2y = b.smooth ? 2 * b.y - b.hy : b.y;
+    for (v in [3, c1x, c1y, c2x, c2y, b.x, b.y])
+      d.push(v);
+  }
+
+  function penPathData(closed:Bool):Array<Float>
+  {
+    var d:Array<Float> = [0, penPts[0].x, penPts[0].y];
+    for (i in 1...penPts.length)
+      penSegment(d, penPts[i - 1], penPts[i]);
+    if (closed)
+    {
+      penSegment(d, penPts[penPts.length - 1], penPts[0]);
+      d.push(4);
+    }
+    return d;
+  }
+
+  /**
+   * End the Pen path: a closed one is filled (and outlined), an open one is a line.
+   */
+  function finishPen(closed:Bool):Void
+  {
+    var pts = penPts;
+    if (pts.length < 2)
+    {
+      penPts = [];
+      return;
+    }
+    var path:AnimPath = {d: penPathData(closed)};
+    penPts = [];
+    if (closed && fillOn) path.fill = fillColor | 0xFF000000;
+    if (!closed || strokeOn || path.fill == null)
+    {
+      path.stroke = strokeColor | 0xFF000000;
+      path.width = Math.max(0.5, shapeStroke);
+    }
+    commitPath(path);
+  }
+
+  /**
+   * Put a finished path on the current layer: a new shape on vector layers, painted onto the canvas on paint layers.
+   */
+  function commitPath(path:AnimPath):Void
+  {
+    doc.checkpoint();
+    var key = drawKey();
+    if (key == null)
+    {
+      doc.dropCheckpoint();
+      return;
+    }
+    if (currentLayer().kind == 'bitmap')
+    {
+      paintKey = key;
+      paintBitmap = doc.editableBitmap(key);
+      var pb = AnimGeom.pathBounds(path);
+      growCanvasFor(new Point(pb.x, pb.y), new Point(pb.right, pb.bottom), (path.width ?? 0) + 2);
+      var bmp = paintBitmap;
+      paintKey = null;
+      paintBitmap = null;
+      var sh = new Shape();
+      AnimGeom.drawPath(sh.graphics, path);
+      sh.x = -(key.bx ?? 0);
+      sh.y = -(key.by ?? 0);
+      var holder = new Sprite();
+      holder.addChild(sh);
+      AnimPaint.drawShape(bmp, holder);
+    }
+    else
+    {
+      var el = AnimData.identity('shape');
+      el.paths = [path];
+      key.elements.push(el);
+    }
+    doc.changed();
+  }
+
+  //
+  // Ink Bottle, Eyedropper, Rotation and Zoom tools
+  //
+
+  /**
+   * Ink Bottle: click a line to give it the stroke color and width, or a fill to give it an outline.
+   */
+  function inkBottle(local:Point):Void
+  {
+    var layer = currentLayer();
+    if (layer == null || layer.kind != 'vector')
+    {
+      setStatus('The Ink Bottle colors lines on vector layers.');
+      return;
+    }
+    var key = AnimData.keyAt(layer, frame);
+    if (key == null || AnimData.isLocked(sym, curLayer)) return;
+    var i = key.elements.length - 1;
+    while (i >= 0)
+    {
+      var el = key.elements[i--];
+      if (el.type != 'shape' || el.paths == null) continue;
+      var inv = intoElement(el, local);
+      var tol = 5 / inv.scale;
+      // Lines first (they're drawn over fills), then fills.
+      var target:Null<AnimPath> = null;
+      for (path in el.paths)
+        if (path.stroke != null && AnimGeom.distanceToPath(path, inv.p.x, inv.p.y) <= tol + (path.width ?? 1) / 2) target = path;
+      if (target == null)
+      {
+        var j = el.paths.length - 1;
+        while (j >= 0)
+        {
+          var path = el.paths[j--];
+          if ((path.fill != null || path.gradient != null || path.bitmapFill != null) && AnimGeom.pathContains(path, inv.p.x, inv.p.y))
+          {
+            target = path;
+            break;
+          }
+        }
+      }
+      if (target == null) continue;
+      doc.checkpoint();
+      target.stroke = strokeColor | 0xFF000000;
+      target.width = Math.max(0.5, shapeStroke);
+      // A new paths array so the cached drawing is made again.
+      el.paths = el.paths.copy();
+      doc.changed();
+      return;
+    }
+    setStatus('Click a line or a fill.');
+  }
+
+  /**
+   * Eyedropper like Animate's: a line gives the stroke color (and the Ink Bottle), anything else the fill color (and
+   * the Paint Bucket). Alt+click always takes the stroke color.
+   */
+  function pickColorAnimate(mx:Float, my:Float, local:Point):Void
+  {
+    var hits = renderer.hits.copy();
+    hits.reverse();
+    for (h in hits)
+    {
+      var el = elementOf({layer: h.layer, element: h.element});
+      if (el == null || el.type != 'shape' || el.paths == null || AnimData.isHidden(sym, h.layer)) continue;
+      var inv = intoElement(el, local);
+      var tol = 4 / inv.scale;
+      for (path in el.paths)
+      {
+        if (path.stroke == null || AnimGeom.distanceToPath(path, inv.p.x, inv.p.y) > tol + (path.width ?? 1) / 2) continue;
+        strokeColor = path.stroke | 0xFF000000;
+        if (path.width != null) shapeStroke = path.width;
+        colorForm.refresh();
+        setTool('ink');
+        setStatus('Picked the line color #${StringTools.hex(strokeColor & 0xFFFFFF, 6)}.');
+        return;
+      }
+    }
+    pickColor(mx, my, FlxG.keys.pressed.ALT);
+    if (!FlxG.keys.pressed.ALT && tool == 'picker') setTool('fill');
+  }
+
+  function rotviewDown(mx:Float, my:Float):Void
+  {
+    drag = 'rotview';
+    rotStartAngle = Math.atan2(my - centerY(), mx - centerX());
+    rotStartView = viewRotation;
+  }
+
+  function rotviewDrag(mx:Float, my:Float):Void
+  {
+    var a = Math.atan2(my - centerY(), mx - centerX());
+    var deg = rotStartView + (a - rotStartAngle) * 180 / Math.PI;
+    if (FlxG.keys.pressed.SHIFT) deg = Math.round(deg / 15) * 15;
+    rotateView(deg, true);
+  }
+
+  /**
+   * Zoom tool: click zooms in, Alt+click out, dragging a box zooms to fit it.
+   */
+  function zoomBoxUp(mx:Float, my:Float):Void
+  {
+    var w = Math.abs(mx - cDragX), h = Math.abs(my - cDragY);
+    if (w < 6 || h < 6)
+    {
+      zoomAt(1.25, mx, my);
+      return;
+    }
+    var bx = (mx + cDragX) / 2, by = (my + cDragY) / 2;
+    var f = Math.min((workRight - workLeft) / w, (workBottom - QOLEditorState.MENUBAR_HEIGHT) / h) * 0.9;
+    zoomAt(f, bx, by);
+    // Bring the box's middle to the middle of the view.
+    viewX += centerX() - bx;
+    viewY += centerY() - by;
+  }
+
+  //
+  // Overlay for the Animate tools
+  //
+
+  function drawAnimateOverlay(g:openfl.display.Graphics):Void
+  {
+    drawGrid();
+    // Lasso outline.
+    if (drag == 'lasso' && lassoPts.length >= 4)
+    {
+      var first = toScreen(lassoPts[0], lassoPts[1]);
+      g.lineStyle(1.5, 0xFFD84A, 1);
+      g.beginFill(0xFFD84A, 0.08);
+      g.moveTo(first.x, first.y);
+      var i = 2;
+      while (i < lassoPts.length)
+      {
+        var p = toScreen(lassoPts[i], lassoPts[i + 1]);
+        g.lineTo(p.x, p.y);
+        i += 2;
+      }
+      g.lineTo(lastMX, lastMY);
+      g.endFill();
+      g.lineStyle();
+    }
+    // Zoom box.
+    if (drag == 'zoombox')
+    {
+      g.lineStyle(1, 0x5CE1FF, 1);
+      g.drawRect(Math.min(cDragX, lastMX), Math.min(cDragY, lastMY), Math.abs(lastMX - cDragX), Math.abs(lastMY - cDragY));
+      g.lineStyle();
+    }
+    // Pen path so far, the rubber band to the mouse, the points and handles.
+    if (penPts.length > 0)
+    {
+      var d = penPathData(false);
+      if (drag != 'pen' && overCanvas)
+      {
+        var m = snapLocal(toLocal(lastMX, lastMY));
+        penSegment(d, penPts[penPts.length - 1], {x: m.x, y: m.y, hx: m.x, hy: m.y, smooth: false});
+      }
+      var sp:AnimPath = {d: d.copy(), stroke: strokeColor | 0xFF000000, width: 1};
+      AnimGeom.transformPath(sp, fullMatrix());
+      sp.width = 1.5;
+      AnimGeom.drawPath(g, sp);
+      for (i in 0...penPts.length)
+      {
+        var pt = penPts[i];
+        var p = toScreen(pt.x, pt.y);
+        if (pt.smooth)
+        {
+          var h1 = toScreen(pt.hx, pt.hy), h2 = toScreen(2 * pt.x - pt.hx, 2 * pt.y - pt.hy);
+          g.lineStyle(1, 0x5CE1FF, 0.9);
+          g.moveTo(h2.x, h2.y);
+          g.lineTo(h1.x, h1.y);
+          g.lineStyle();
+          for (hp in [h1, h2])
+          {
+            g.beginFill(0x5CE1FF, 1);
+            g.drawCircle(hp.x, hp.y, 3);
+            g.endFill();
+          }
+        }
+        g.lineStyle(1, 0x1A1030, 1);
+        g.beginFill(i == 0 ? 0xFFD84A : 0xFFFFFF, 1);
+        g.drawRect(p.x - 3.5, p.y - 3.5, 7, 7);
+        g.endFill();
+        g.lineStyle();
+      }
+    }
+    // Subselection: the shape's points and curve handles.
+    if (tool == 'subselect' && subSel != null && reshapeable(subSel))
+    {
+      var el = elementOf(subSel);
+      var m = AnimGeom.matrixOf(el);
+      m.concat(fullMatrix());
+      var segs = AnimEdit.segments(el.paths);
+      if (segs.length <= 4000)
+      {
+        var outline:Array<AnimPath> = [for (p in el.paths) if (p.d != null) {d: p.d.copy(), stroke: 0xFF5CE1FF, width: 1}];
+        for (o in outline)
+        {
+          AnimGeom.transformPath(o, m);
+          o.width = 1;
+          AnimGeom.drawPath(g, o);
+        }
+        for (sg in segs)
+        {
+          var d = el.paths[sg.path].d;
+          var a = m.transformPoint(new Point(sg.x0, sg.y0));
+          var b = m.transformPoint(new Point(sg.x1, sg.y1));
+          if (sg.cmd >= 2)
+          {
+            var handles = sg.cmd == 2 ? [[d[sg.at + 1], d[sg.at + 2], 0]] : [[d[sg.at + 1], d[sg.at + 2], 0], [d[sg.at + 3], d[sg.at + 4], 1]];
+            for (hd in handles)
+            {
+              var c = m.transformPoint(new Point(hd[0], hd[1]));
+              var anchor = hd[2] == 0 ? a : b;
+              g.lineStyle(1, 0x9A8CFF, 0.8);
+              g.moveTo(anchor.x, anchor.y);
+              g.lineTo(c.x, c.y);
+              if (sg.cmd == 2)
+              {
+                g.moveTo(b.x, b.y);
+                g.lineTo(c.x, c.y);
+              }
+              g.lineStyle();
+              g.beginFill(0x9A8CFF, 1);
+              g.drawCircle(c.x, c.y, 3);
+              g.endFill();
+            }
+          }
+          for (pt in [a, b])
+          {
+            g.lineStyle(1, 0x2E6BFF, 1);
+            g.beginFill(0xFFFFFF, 1);
+            g.drawRect(pt.x - 3, pt.y - 3, 6, 6);
+            g.endFill();
+            g.lineStyle();
+          }
+        }
+      }
+    }
+    // Selection tool hovering an edge or a corner: the little curve / corner cursor Animate shows.
+    var selecting = (tool == 'select' || tempSelect()) && drag == '' && overCanvas && !FlxG.keys.pressed.SHIFT;
+    if (selecting)
+    {
+      var key = '${Math.round(lastMX)},${Math.round(lastMY)},$frame,${renderer.hits.length},${selection.length}';
+      if (key != hoverKey)
+      {
+        hoverKey = key;
+        var et = edgeTarget(lastMX, lastMY);
+        hoverReshape = et == null ? '' : (et.anchor != null ? 'corner' : 'edge');
+      }
+      var x = lastMX + 24, y = lastMY + 24;
+      if (hoverReshape == 'edge')
+      {
+        g.lineStyle(3, 0x1A1030, 0.8);
+        g.moveTo(x, y + 6);
+        g.curveTo(x + 6, y - 2, x + 12, y + 6);
+        g.lineStyle(1.5, 0xFFFFFF, 1);
+        g.moveTo(x, y + 6);
+        g.curveTo(x + 6, y - 2, x + 12, y + 6);
+        g.lineStyle();
+      }
+      else if (hoverReshape == 'corner')
+      {
+        g.lineStyle(3, 0x1A1030, 0.8);
+        g.moveTo(x, y + 8);
+        g.lineTo(x + 5, y);
+        g.lineTo(x + 10, y + 8);
+        g.lineStyle(1.5, 0xFFFFFF, 1);
+        g.moveTo(x, y + 8);
+        g.lineTo(x + 5, y);
+        g.lineTo(x + 10, y + 8);
+        g.lineStyle();
+      }
+    }
+    else
+      hoverReshape = '';
+  }
+
+  /**
+   * The grid behind the drawing (in stage coordinates, like Animate's).
+   */
+  function drawGrid():Void
+  {
+    if (gridShape == null)
+    {
+      gridShape = new Shape();
+      stageHolder.addChildAt(gridShape, stageHolder.getChildIndex(checker) + 1);
+    }
+    var w = doc.project.width, h = doc.project.height;
+    var key = '$showGrid,$gridSize,$w,$h,$zoom';
+    if (key == gridKey) return;
+    gridKey = key;
+    var g = gridShape.graphics;
+    g.clear();
+    if (!showGrid || gridSize * zoom < 3) return;
+    g.lineStyle(1 / Math.max(0.01, zoom), 0x5A6B9A, 0.35);
+    var x = 0.0;
+    while (x <= w)
+    {
+      g.moveTo(x, 0);
+      g.lineTo(x, h);
+      x += gridSize;
+    }
+    var y = 0.0;
+    while (y <= h)
+    {
+      g.moveTo(0, y);
+      g.lineTo(w, y);
+      y += gridSize;
+    }
+    g.lineStyle();
+  }
+
+  //
+  // Animate commands
+  //
+
+  function groupSelection():Void
+  {
+    if (selection.length < 2)
+    {
+      setStatus('Select two or more things to group them.');
+      return;
+    }
+    var layerIdx = selection[0].layer;
+    doc.checkpoint();
+    var id = AnimData.makeId('grp');
+    var count = 0;
+    for (s in selection)
+    {
+      if (s.layer != layerIdx) continue;
+      var el = elementOf(s);
+      if (el == null) continue;
+      el.group = id;
+      count++;
+    }
+    selection = [for (s in selection) if (s.layer == layerIdx) s];
+    doc.changed();
+    setStatus(count < 2 ? 'Groups are made on one layer at a time.' : 'Grouped $count items (Ctrl+Shift+G ungroups).');
+  }
+
+  function ungroupSelection():Void
+  {
+    var any = false;
+    for (s in selection)
+      if (elementOf(s)?.group != null) any = true;
+    if (!any) return;
+    doc.checkpoint();
+    for (s in selection)
+    {
+      var el = elementOf(s);
+      if (el != null) Reflect.deleteField(el, 'group');
+    }
+    doc.changed();
+  }
+
+  /**
+   * Ctrl+D: copies of the selection, a little down and to the right.
+   */
+  function duplicateSelection():Void
+  {
+    if (selection.length == 0) return;
+    doc.checkpoint();
+    duplicateInPlace();
+    for (s in selection)
+    {
+      var el = elementOf(s);
+      if (el == null) continue;
+      el.tx += 10;
+      el.ty += 10;
+    }
+    doc.changed();
+  }
+
+  /**
+   * Ctrl+E: edit the selected symbol, or go back to the main timeline.
+   */
+  function editSymbolToggle():Void
+  {
+    var el = selection.length == 1 ? elementOf(selection[0]) : null;
+    if (el != null && el.type == 'symbol' && el.symbol != null) enterSymbol(el.symbol);
+    else if (editPath.length > 0) exitSymbol(true);
+  }
+
+  /**
+   * Ctrl+Shift+Z: undo scaling, rotating and skewing (the position stays).
+   */
+  function removeTransform():Void
+  {
+    if (selection.length == 0) return;
+    doc.checkpoint();
+    autoKeyframes();
+    for (s in selection)
+    {
+      var el = elementOf(s);
+      if (el == null) continue;
+      el.a = 1;
+      el.b = 0;
+      el.c = 0;
+      el.d = 1;
+    }
+    doc.changed();
+  }
+
+  /**
+   * Ctrl+Alt+S: scale and rotate by exact amounts.
+   */
+  function scaleRotateDialog():Void
+  {
+    if (selection.length == 0)
+    {
+      setStatus('Select something first.');
+      return;
+    }
+    var scale = 100.0, rot = 0.0;
+    AnimExport.formDialog('Scale and Rotate', 'OK', form -> {
+      form.number('Scale %', () -> scale, v -> scale = v, 1, 10000, 1, 1);
+      form.number('Rotate (degrees)', () -> rot, v -> rot = v, -360, 360, 1, 1);
+    }, () -> transformSelection(m -> {
+      m.scale(scale / 100, scale / 100);
+      m.rotate(rot * Math.PI / 180);
+    }));
+  }
+
+  /**
+   * Things to align: groups move as one.
+   */
+  function alignUnits():Array<{sels:Array<AnimSel>, b:Rectangle}>
+  {
+    var units:Array<{sels:Array<AnimSel>, b:Rectangle}> = [];
+    var byGroup = new Map<String, {sels:Array<AnimSel>, b:Rectangle}>();
+    for (s in selection)
+    {
+      var obj = hitObject(s);
+      var el = elementOf(s);
+      if (obj == null || el == null) continue;
+      var b = obj.getBounds(contentHolder);
+      b.x -= symOffsetX();
+      b.y -= symOffsetY();
+      var gid = el.group != null ? '${s.layer}:${el.group}' : null;
+      if (gid != null && byGroup.exists(gid))
+      {
+        var u = byGroup.get(gid);
+        u.sels.push(s);
+        u.b = u.b.union(b);
+        continue;
+      }
+      var u = {sels: [s], b: b};
+      units.push(u);
+      if (gid != null) byGroup.set(gid, u);
+    }
+    return units;
+  }
+
+  /**
+   * Align (Ctrl+Alt+1..6): left, center, right, top, middle, bottom. To the stage when "Align to stage" is on (or
+   * there's just one thing).
+   */
+  function alignSelection(mode:String):Void
+  {
+    var units = alignUnits();
+    if (units.length == 0) return;
+    var area:Rectangle;
+    if (alignToStage || units.length == 1) area = new Rectangle(-symOffsetX(), -symOffsetY(), doc.project.width, doc.project.height);
+    else
+    {
+      area = units[0].b.clone();
+      for (u in units)
+        area = area.union(u.b);
+    }
+    doc.checkpoint();
+    autoKeyframes();
+    for (u in units)
+    {
+      var dx = 0.0, dy = 0.0;
+      switch (mode)
+      {
+        case 'left': dx = area.x - u.b.x;
+        case 'hcenter': dx = (area.x + area.width / 2) - (u.b.x + u.b.width / 2);
+        case 'right': dx = area.right - u.b.right;
+        case 'top': dy = area.y - u.b.y;
+        case 'vcenter': dy = (area.y + area.height / 2) - (u.b.y + u.b.height / 2);
+        case 'bottom': dy = area.bottom - u.b.bottom;
+      }
+      for (s in u.sels)
+      {
+        var el = elementOf(s);
+        if (el == null) continue;
+        el.tx += dx;
+        el.ty += dy;
+      }
+    }
+    doc.changed();
+  }
+
+  /**
+   * Spread things out evenly between the first and the last (by their middles).
+   */
+  function distributeSelection(horizontal:Bool):Void
+  {
+    var units = alignUnits();
+    if (units.length < 3)
+    {
+      setStatus('Select three or more things to space them out.');
+      return;
+    }
+    inline function mid(u:{sels:Array<AnimSel>, b:Rectangle}):Float
+      return horizontal ? u.b.x + u.b.width / 2 : u.b.y + u.b.height / 2;
+    units.sort((a, b) -> mid(a) < mid(b) ? -1 : (mid(a) > mid(b) ? 1 : 0));
+    var first = mid(units[0]), last = mid(units[units.length - 1]);
+    doc.checkpoint();
+    autoKeyframes();
+    for (i in 1...units.length - 1)
+    {
+      var target = first + (last - first) * i / (units.length - 1);
+      var delta = target - mid(units[i]);
+      for (s in units[i].sels)
+      {
+        var el = elementOf(s);
+        if (el == null) continue;
+        if (horizontal) el.tx += delta;
+        else
+          el.ty += delta;
+      }
+    }
+    doc.changed();
+  }
+
+  /**
+   * Ctrl+K: the Align panel.
+   */
+  function alignDialog():Void
+  {
+    var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
+    dialog.title = 'Align';
+    dialog.buttons = DialogButton.CLOSE;
+    dialog.destroyOnClose = true;
+    var box = new VBox();
+    box.styleString = 'spacing: 6px;';
+    function row(defs:Array<{text:String, tip:String, cb:Void->Void}>)
+    {
+      var r = new HBox();
+      r.styleString = 'spacing: 4px;';
+      for (d in defs)
+      {
+        var b = new Button();
+        b.text = d.text;
+        b.width = 112;
+        b.tooltip = d.tip;
+        var cb = d.cb;
+        b.onClick = _ -> cb();
+        r.addComponent(b);
+      }
+      box.addComponent(r);
+    }
+    row([
+      {text: 'Left', tip: 'Ctrl+Alt+1', cb: () -> alignSelection('left')},
+      {text: 'Center', tip: 'Ctrl+Alt+2', cb: () -> alignSelection('hcenter')},
+      {text: 'Right', tip: 'Ctrl+Alt+3', cb: () -> alignSelection('right')}
+    ]);
+    row([
+      {text: 'Top', tip: 'Ctrl+Alt+4', cb: () -> alignSelection('top')},
+      {text: 'Middle', tip: 'Ctrl+Alt+5', cb: () -> alignSelection('vcenter')},
+      {text: 'Bottom', tip: 'Ctrl+Alt+6', cb: () -> alignSelection('bottom')}
+    ]);
+    row([
+      {text: 'Space across', tip: 'Ctrl+Alt+7', cb: () -> distributeSelection(true)},
+      {text: 'Space down', tip: 'Ctrl+Alt+9', cb: () -> distributeSelection(false)}
+    ]);
+    var stage = new CheckBox();
+    stage.text = 'Align to stage (Ctrl+Alt+8)';
+    stage.selected = alignToStage;
+    stage.onChange = _ -> alignToStage = stage.selected;
+    box.addComponent(stage);
+    dialog.addComponent(box);
+    dialog.showDialog(false);
+  }
+
+  /**
+   * F4: fold every panel away (and back).
+   */
+  function togglePanels():Void
+  {
+    if (panelStates == null)
+    {
+      panelStates = [for (p in panels) p.collapsed];
+      for (p in panels)
+        p.collapsed = true;
+    }
+    else
+    {
+      for (i in 0...panels.length)
+        if (i < panelStates.length) panels[i].collapsed = panelStates[i];
+      panelStates = null;
+    }
+    layoutPanels();
+  }
+
+  /**
+   * Ctrl+Enter: play the whole animation from the start with the panels out of the way.
+   */
+  function testMovie():Void
+  {
+    if (testing)
+    {
+      endTest();
+      return;
+    }
+    commitPixels();
+    exitSymbol(true);
+    if (panelStates == null) togglePanels();
+    fitView();
+    setFrame(0);
+    selection = [];
+    playing = true;
+    playTime = 0;
+    renderDirty = true;
+    testing = true;
+    setStatus('Testing: Esc or Ctrl+Enter stops.');
+  }
+
+  function endTest():Void
+  {
+    testing = false;
+    stop();
+    if (panelStates != null) togglePanels();
+    fitView();
+    setStatus('');
+  }
+
+  /**
+   * Ctrl+R: bring files onto the stage (anything that can be dropped on the Animator).
+   */
+  function importToStage():Void
+  {
+    funkin.qol.util.QOLFilePicker.open('Import to Stage', [
+      'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'xml', 'json', 'zip', 'fla', 'xfl', 'psd', 'mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v', 'mp3', 'ogg',
+      'wav', 'flac', 'm4a', 'opus', 'txt'
+    ], true, files -> {
+      try
+      {
+        AnimImport.importDropped(this, files, null);
+      }
+      catch (e:Dynamic)
+      {
+        alert('Could not import', Std.string(e));
+      }
+    });
+  }
+
+  function deselectAll():Void
+  {
+    commitPixels();
+    selection = [];
+    subSel = null;
+    refreshProps();
+  }
+
+  function cutFrames():Void
+  {
+    copyFrames();
+    removeFrames();
+  }
+
+  /**
+   * Ctrl+Alt+A: every frame of the current layer.
+   */
+  function selectAllFrames():Void
+  {
+    var len = AnimData.symbolLength(sym);
+    selStart = 0;
+    selEnd = Std.int(Math.max(0, len - 1));
+  }
+
+  /**
+   * Alt+click a layer's eye or lock: only this layer shown / unlocked (again to undo).
+   */
+  public function soloLayer(row:Int, flag:String):Void
+  {
+    var layer = sym.layers[row];
+    if (layer == null) return;
+    doc.checkpoint();
+    var others = [for (i in 0...sym.layers.length) if (i != row) sym.layers[i]];
+    if (flag == 'visible')
+    {
+      var solo = layer.visible && Lambda.foreach(others, l -> !l.visible);
+      layer.visible = true;
+      for (l in others)
+        l.visible = solo;
+    }
+    else
+    {
+      var solo = !layer.locked && Lambda.foreach(others, l -> l.locked);
+      layer.locked = false;
+      for (l in others)
+        l.locked = !solo;
+    }
+    selection = [for (s in selection) if (!AnimData.isLocked(sym, s.layer) && !AnimData.isHidden(sym, s.layer)) s];
+    doc.changed();
+  }
+
+  /**
+   * Alt+drag a keyframe: a copy of it at another frame.
+   */
+  public function copyKeyTo(layerIdx:Int, key:AnimKeyframe, at:Int):Void
+  {
+    var layer = sym.layers[layerIdx];
+    if (layer == null || at < 0) return;
+    doc.checkpoint();
+    var bmp:Null<String> = null;
+    if (layer.kind == 'bitmap' && key.bitmap != null)
+    {
+      var src = doc.getBitmap(key.bitmap);
+      if (src != null) bmp = doc.addBitmap(src.clone(), 'canvas', false);
+    }
+    var made = splitKeyAt(layer, at, AnimData.copy(key.elements), bmp);
+    if (bmp != null)
+    {
+      made.bx = key.bx;
+      made.by = key.by;
+    }
+    if (key.tween != null) made.tween = AnimData.copy(key.tween);
+    if (key.camera != null) made.camera = AnimData.copy(key.camera);
+    if (key.sound != null)
+    {
+      made.sound = key.sound;
+      made.soundStart = key.soundStart;
+    }
+    setFrame(at);
+    doc.changed();
+  }
+
+  /**
+   * Ctrl+drag the end of a frame span: make it longer or shorter (the frames after it move along).
+   */
+  public function resizeSpan(layerIdx:Int, key:AnimKeyframe, newEnd:Int):Void
+  {
+    var layer = sym.layers[layerIdx];
+    if (layer == null) return;
+    var duration = Std.int(Math.max(1, newEnd - key.start + 1));
+    var delta = duration - key.duration;
+    if (delta == 0) return;
+    key.duration = duration;
+    for (k in layer.frames)
+      if (k.start > key.start) k.start += delta;
+    setFrame(key.start + duration - 1, false);
+    selStart = key.start;
+    selEnd = key.start + duration - 1;
+    renderDirty = true;
+    dirty = true;
+  }
+
+  /**
+   * F6 over several selected frames makes each of them a keyframe (like Animate).
+   */
+  function insertKeyframes(blank:Bool):Void
+  {
+    var a = Std.int(Math.min(selStart, selEnd)), b = Std.int(Math.max(selStart, selEnd));
+    if (b <= a || a > frame || b < frame)
+    {
+      insertKeyframe(blank);
+      return;
+    }
+    var layer = currentLayer();
+    if (layer == null || onFolder()) return;
+    doc.checkpoint();
+    for (f in a...b + 1)
+    {
+      var key = AnimData.keyAt(layer, f);
+      if (key != null && key.start == f) continue;
+      var elements:Array<AnimElement> = blank || key == null ? [] : AnimData.copy(renderer.tweenedElements(layer, key, f));
+      var bmp:Null<String> = null;
+      if (layer.kind == 'bitmap')
+      {
+        var old = key != null ? doc.getBitmap(key.bitmap) : null;
+        bmp = blank || old == null ? doc.newCanvas() : doc.addBitmap(old.clone(), 'canvas', false);
+      }
+      var made = splitKeyAt(layer, f, elements, bmp);
+      if (layer.kind == 'bitmap' && key != null)
+      {
+        made.bx = key.bx;
+        made.by = key.by;
+      }
+    }
+    doc.changed();
+  }
+
+  /**
+   * Every Animate shortcut the Animator knows (shown in Help > Keyboard Shortcuts).
+   */
+  public static final SHORTCUTS:Array<Array<String>> = [
+    ['Tools', ''],
+    ['V', 'Selection'], ['A', 'Subselection (move points and curve handles)'], ['Q', 'Free Transform'], ['L', 'Lasso'], ['P', 'Pen'], ['T', 'Text'],
+    ['N', 'Line'], ['R', 'Rectangle'], ['O', 'Oval'], ['Y', 'Pencil'], ['B', 'Brush'], ['K', 'Paint Bucket'], ['S', 'Ink Bottle'],
+    ['I', 'Eyedropper'], ['E', 'Eraser'], ['H', 'Hand'], ['Shift+H', 'Rotation (turn the view)'], ['Z', 'Zoom'],
+    ['C', 'Camera (picks or adds the camera layer)'], ['Space (hold)', 'Hand tool while held'], ['Ctrl (hold)', 'Selection tool while held'],
+    ['X', 'Swap stroke and fill colors'], ['[ / ]', 'Smaller / bigger brush'],
+    ['File', ''],
+    ['Ctrl+N', 'New'], ['Ctrl+O', 'Open'], ['Ctrl+S', 'Save'], ['Ctrl+Shift+S', 'Save As'], ['Ctrl+R', 'Import to Stage'],
+    ['Ctrl+Alt+Shift+S', 'Export Movie (video)'], ['Ctrl+Enter', 'Test Movie (play it all, panels hidden)'], ['Ctrl+W', 'Close the Animator'],
+    ['Edit', ''],
+    ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+X / Ctrl+C / Ctrl+V', 'Cut / Copy / Paste'], ['Ctrl+Shift+V', 'Paste in Place'],
+    ['Ctrl+D', 'Duplicate'], ['Delete / Backspace', 'Delete'], ['Ctrl+A', 'Select All'], ['Ctrl+Shift+A', 'Deselect All'],
+    ['Ctrl+E', 'Edit Symbol / back to the document'],
+    ['Modify', ''],
+    ['F8', 'Convert to Symbol'], ['Ctrl+F8', 'New Symbol'], ['Ctrl+B', 'Break Apart'], ['Ctrl+G', 'Group'], ['Ctrl+Shift+G', 'Ungroup'],
+    ['Ctrl+Shift+Z', 'Remove Transform'], ['Ctrl+Alt+S', 'Scale and Rotate'], ['Ctrl+Shift+9 / Ctrl+Shift+7', 'Rotate 90° clockwise / counter-clockwise'],
+    ['Ctrl+Up / Ctrl+Down', 'Bring Forward / Send Backward'], ['Ctrl+Shift+Up / Down', 'Bring to Front / Send to Back'],
+    ['Ctrl+K', 'Align panel'], ['Ctrl+Alt+1 … 6', 'Align left, center, right, top, middle, bottom'], ['Ctrl+Alt+7 / 9', 'Space evenly across / down'],
+    ['Ctrl+Alt+8', 'Align to stage on/off'], ['Arrows (Shift)', 'Nudge 1 px (10 px)'],
+    ['Timeline', ''],
+    ['Enter', 'Play / Stop'], [', / .', 'Previous / next frame'], ['Home / End, Shift+, / Shift+.', 'First / last frame'],
+    ['F5 / Shift+F5', 'Insert / remove frames'], ['F6 / F7', 'Keyframe / blank keyframe'], ['Shift+F6', 'Clear keyframe'],
+    ['Ctrl+Alt+C / X / V', 'Copy / cut / paste frames'], ['Ctrl+Alt+A', 'Select all frames'], ['Alt+Shift+O', 'Onion skin on/off'],
+    ['View', ''],
+    ['Ctrl+= / Ctrl+-', 'Zoom in / out'], ['Ctrl+1', '100%'], ['Ctrl+2', 'Fit the stage (Show Frame)'], ['Ctrl+3', 'Show everything (Show All)'],
+    ['Ctrl+4 / Ctrl+8', '400% / 800%'], ["Ctrl+'", 'Show grid'], ["Ctrl+Shift+'", 'Snap to grid'], ['Ctrl+Alt+G', 'Edit grid'],
+    ['Ctrl+H', 'Hide selection edges'], ['Ctrl+Alt+Shift+O', 'Outlines (every layer)'], ['F4', 'Hide panels'], ['Ctrl+L', 'Library'],
+    ['Ctrl+F3', 'Properties'], ['Ctrl+J', 'Document settings'], ['Ctrl+Alt+Shift+K', 'This list'],
+    ['Mouse', ''],
+    ['Drag an edge (Selection tool)', 'Bend it into a curve'], ['Drag a corner', 'Move the corner'], ['Ctrl/Alt+drag an edge', 'Add a corner'],
+    ['Alt+drag', 'Drag a copy'], ['Shift+click', 'Add to the selection'], ['Shift while drawing', 'Square / circle / 45° / straight'],
+    ['Alt while drawing a rectangle or oval', 'Draw from the middle'], ['Double-click a symbol', 'Edit it in place'],
+    ['Double-click empty stage', 'Back out of the symbol'], ['Pen: click / drag', 'Corner point / curve point'],
+    ['Pen: click the first point', 'Close the shape'], ['Pen: double-click, Enter or Ctrl+click', 'Finish an open line'],
+    ['Zoom tool: drag', 'Zoom to the box (Alt+click zooms out)'], ['Ctrl+wheel / Alt+wheel', 'Zoom'], ['Shift+wheel', 'Scroll sideways'],
+    ['Ctrl+Shift+wheel', 'Turn the view'], ['Middle mouse drag', 'Pan'], ['Alt+click a layer\'s eye / lock', 'Show / unlock only that layer'],
+    ['Alt+drag a keyframe', 'Copy it'], ['Ctrl+drag the end of a frame span', 'Make it longer or shorter'], ['Double-click a frame', 'Select its span'],
+    ['Right-click', 'Menus for the stage, frames and layers'],
+  ];
+
+  /**
+   * Ctrl+Alt+Shift+K: every shortcut.
+   */
+  public function shortcutsDialog():Void
+  {
+    var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
+    dialog.title = 'Keyboard Shortcuts (Adobe Animate)';
+    dialog.buttons = DialogButton.CLOSE;
+    dialog.destroyOnClose = true;
+    var scroll = new funkin.qol.ui.QOLScrollView();
+    scroll.width = 620;
+    scroll.height = 480;
+    scroll.horizontalScrollPolicy = 'never';
+    var box = new VBox();
+    box.width = 590;
+    box.styleString = 'spacing: 2px;';
+    for (row in SHORTCUTS)
+    {
+      if (row[1] == '')
+      {
+        var head = new Label();
+        head.text = row[0];
+        head.styleString = 'font-bold: true; font-size: 15px; color: #FFD84A; padding-top: 8px;';
+        box.addComponent(head);
+        continue;
+      }
+      var r = new HBox();
+      var k = new Label();
+      k.text = row[0];
+      k.width = 250;
+      k.styleString = 'font-bold: true; color: #9FE8FF;';
+      var v = new Label();
+      v.text = row[1];
+      v.width = 330;
+      r.addComponent(k);
+      r.addComponent(v);
+      box.addComponent(r);
+    }
+    scroll.addComponent(box);
+    dialog.addComponent(scroll);
+    dialog.showDialog(true);
+  }
+
+  /**
+   * Ctrl+Alt+G: grid size.
+   */
+  function gridDialog():Void
+  {
+    AnimExport.formDialog('Grid', 'OK', form -> {
+      form.check('Show grid', () -> showGrid, v -> showGrid = v);
+      form.check('Snap to grid', () -> snapGrid, v -> snapGrid = v);
+      form.number('Size (px)', () -> gridSize, v -> gridSize = Math.max(2, v), 2, 500, 1, 0);
+    }, () -> gridKey = '');
+  }
+
+  /**
+   * Ctrl+3: zoom to show everything that's drawn.
+   */
+  function showAll():Void
+  {
+    var b = contentHolder.getBounds(stageHolder);
+    if (b.width < 1 || b.height < 1)
+    {
+      fitView();
+      return;
+    }
+    var aw = workRight - workLeft - 40, ah = workBottom - QOLEditorState.MENUBAR_HEIGHT - 40;
+    zoom = Math.max(0.05, Math.min(32, Math.min(aw / b.width, ah / b.height)));
+    viewRotation = 0;
+    var m = stageMatrix();
+    var mid = m.transformPoint(new Point(b.x + b.width / 2, b.y + b.height / 2));
+    viewX += centerX() - mid.x;
+    viewY += centerY() - mid.y;
+    renderDirty = true;
+  }
+
+  function zoomTo(z:Float):Void
+  {
+    keepPointWhile(centerX(), centerY(), () -> zoom = z);
+  }
+
+  /**
+   * C: the camera layer (made if there isn't one), so dragging the stage moves the camera.
+   */
+  function cameraTool():Void
+  {
+    if (editPath.length > 0)
+    {
+      setStatus('The camera belongs to the main timeline.');
+      return;
+    }
+    for (i in 0...sym.layers.length)
+    {
+      if (sym.layers[i].kind == 'camera')
+      {
+        selectLayer(i);
+        setStatus('Camera: drag the stage to move it, wheel zooms it.');
+        return;
+      }
+    }
+    addCamera();
   }
 
   override public function exitEditor():Void
   {
+    if (testing)
+    {
+      endTest();
+      return;
+    }
+    // Escape ends a Pen line first.
+    if (penPts.length > 0)
+    {
+      finishPen(false);
+      return;
+    }
     // Escape drops selected pixels first.
     if (pixSel != null)
     {

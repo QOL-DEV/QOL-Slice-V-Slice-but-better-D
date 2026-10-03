@@ -620,6 +620,12 @@ class AnimTimelineView extends FlxGroup
   /**
    * Returns true if the timeline used the mouse this frame.
    */
+  var dragCopy:Bool = false;
+  var dragTo:Int = -1;
+  var lastFrameClick:Float = 0;
+  var lastFrameClickAt:Int = -1;
+  var lastFrameClickRow:Int = -1;
+
   public function handleMouse(mx:Float, my:Float):Bool
   {
     var sym = ed.sym;
@@ -637,11 +643,27 @@ class AnimTimelineView extends FlxGroup
             ed.selectFrames(dragLayer, Std.int(Math.min(dragFrame0, f)), Std.int(Math.max(dragFrame0, f)));
             ed.setFrame(f, false);
           case 'key':
-            if (dragKey != null && f != dragFrame0)
+            if (dragCopy)
+            {
+              // Alt+drag: the copy goes where the mouse lets go.
+              dragTo = f;
+              ed.setFrame(f, false);
+            }
+            else if (dragKey != null && f != dragFrame0)
             {
               if (!dragMoved) ed.doc.checkpoint();
               dragMoved = true;
               ed.moveKeyframe(dragLayer, dragKey, dragKeyStart + (f - dragFrame0));
+            }
+          case 'span':
+            if (dragKey != null)
+            {
+              if (!dragMoved && f != dragFrame0)
+              {
+                ed.doc.checkpoint();
+                dragMoved = true;
+              }
+              if (dragMoved) ed.resizeSpan(dragLayer, dragKey, f);
             }
           case 'layer':
             var r = rowAt(my);
@@ -655,8 +677,10 @@ class AnimTimelineView extends FlxGroup
       }
       else
       {
-        if (drag == 'key' && dragMoved) ed.afterTimelineEdit();
+        if (drag == 'key' && dragCopy && dragKey != null && dragTo != dragFrame0 && dragTo >= 0) ed.copyKeyTo(dragLayer, dragKey, dragTo);
+        else if ((drag == 'key' || drag == 'span') && dragMoved) ed.afterTimelineEdit();
         drag = '';
+        dragCopy = false;
       }
       return true;
     }
@@ -707,8 +731,19 @@ class AnimTimelineView extends FlxGroup
       }
       var lx = labelX(layer);
       if (AnimData.isGroup(layer) && mx >= lx - 3 && mx < lx + 12) ed.toggleCollapsed(row);
-      else if (mx >= x + LABEL_W - 60 && mx < x + LABEL_W - 42) ed.toggleLayer(row, 'visible');
-      else if (mx >= x + LABEL_W - 42 && mx < x + LABEL_W - 24) ed.toggleLayer(row, 'locked');
+      else if (mx >= x + LABEL_W - 60 && mx < x + LABEL_W - 42)
+      {
+        // Alt+click: only this layer shows (Animate).
+        if (FlxG.keys.pressed.ALT) ed.soloLayer(row, 'visible');
+        else
+          ed.toggleLayer(row, 'visible');
+      }
+      else if (mx >= x + LABEL_W - 42 && mx < x + LABEL_W - 24)
+      {
+        if (FlxG.keys.pressed.ALT) ed.soloLayer(row, 'locked');
+        else
+          ed.toggleLayer(row, 'locked');
+      }
       else if (mx >= x + LABEL_W - 24 && layer.kind != 'folder') ed.toggleLayer(row, 'outline');
       else
       {
@@ -745,10 +780,34 @@ class AnimTimelineView extends FlxGroup
       return true;
     }
     ed.selectLayer(row);
-    // Dragging a keyframe moves it; dragging elsewhere selects frames.
+    // Dragging a keyframe moves it (Alt+drag copies it); dragging elsewhere selects frames.
     var key = AnimData.keyAt(layer, f);
+    var now = haxe.Timer.stamp();
+    var dbl = now - lastFrameClick < 0.45 && lastFrameClickAt == f && lastFrameClickRow == row;
+    lastFrameClick = now;
+    lastFrameClickAt = f;
+    lastFrameClickRow = row;
+    if (dbl && key != null)
+    {
+      // Double-click: the whole frame span.
+      ed.selectFrames(row, key.start, key.start + key.duration - 1);
+      ed.setFrame(f, false);
+      return true;
+    }
+    // Ctrl+drag the last frame of a span: make it longer or shorter.
+    if (key != null && FlxG.keys.pressed.CONTROL && !layer.locked && f == key.start + key.duration - 1)
+    {
+      drag = 'span';
+      dragKey = key;
+      dragFrame0 = f;
+      dragLayer = row;
+      dragMoved = false;
+      return true;
+    }
     if (key != null && key.start == f && !layer.locked && !FlxG.keys.pressed.SHIFT)
     {
+      dragCopy = FlxG.keys.pressed.ALT;
+      dragTo = f;
       drag = 'key';
       dragKey = key;
       dragKeyStart = key.start;

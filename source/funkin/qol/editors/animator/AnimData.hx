@@ -297,6 +297,11 @@ typedef AnimElement =
    * Hidden instances aren't drawn (Animate's "Visible" box).
    */
   var ?hidden:Bool;
+
+  /**
+   * Grouped items (Ctrl+G) share an id: clicking one selects them all, and they move together.
+   */
+  var ?group:String;
 }
 
 typedef AnimPath =

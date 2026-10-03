@@ -194,7 +194,7 @@ class AnimCanvasDecor extends FlxGroup
   public function showTool(id:String, name:String, key:String, x:Float, y:Float):Void
   {
     var color = AnimatorSkin.TOOL_COLORS.get(id) ?? AnimatorSkin.ACCENT;
-    toastText.text = '$name  ($key)';
+    toastText.text = key == '' ? name : '$name  ($key)';
     var w = Std.int(toastText.textField.textWidth + 70);
     toastBg.loadGraphic(QOLTheme.cached('qol-anim-toast-$w-${StringTools.hex(color, 8)}',
       () -> QOLTheme.drawRound(w, 44, color, 14, AnimatorSkin.lighten(color, 0.6), 3)));

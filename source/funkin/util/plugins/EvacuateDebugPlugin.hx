@@ -23,7 +23,8 @@ class EvacuateDebugPlugin extends FlxBasic
   {
     super.update(elapsed);
 
-    if (FlxG.keys.justPressed.F4)
+    // QOL Slice: the Animator uses F4 (Hide Panels, like Adobe Animate).
+    if (FlxG.keys.justPressed.F4 && !funkin.qol.QOLSlice.editorOwnsFunctionKeys)
     {
       FlxG.switchState(() -> new funkin.ui.mainmenu.MainMenuState());
     }

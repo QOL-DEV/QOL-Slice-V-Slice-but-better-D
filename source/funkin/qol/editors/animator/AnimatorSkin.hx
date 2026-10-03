@@ -215,7 +215,8 @@ class AnimatorSkin
   public static final TOOL_COLORS:Map<String, Int> = [
     'select' => 0xFF4C8DFF, 'brush' => 0xFFFF5C9D, 'pencil' => 0xFFFFA43D, 'eraser' => 0xFFFF6B6B, 'fill' => 0xFF3CCB8F,
     'line' => 0xFF9B6BFF, 'rect' => 0xFF2EC4E6, 'oval' => 0xFFF5C62E, 'poly' => 0xFFFF7A45, 'text' => 0xFF9AD94A,
-    'picker' => 0xFFD65CFF, 'hand' => 0xFF7C93C9, 'zoom' => 0xFF35D4BE
+    'picker' => 0xFFD65CFF, 'hand' => 0xFF7C93C9, 'zoom' => 0xFF35D4BE, 'subselect' => 0xFF8FB4FF, 'transform' => 0xFF5CE1FF,
+    'lasso' => 0xFFFFD84A, 'pen' => 0xFFB98CFF, 'ink' => 0xFF4FD1A5, 'rotview' => 0xFF9AA8D8
   ];
 
   /**
@@ -534,6 +535,46 @@ class AnimatorSkin
       // Tools
       case 'select':
         poly([6, 2.5, 6, 19.5, 10.2, 15.4, 13.2, 21.5, 16, 20.2, 13, 14.2, 18.8, 14.2]);
+      case 'subselect':
+        g.lineStyle(1.8 * s, c, a, false, null, openfl.display.CapsStyle.ROUND, openfl.display.JointStyle.ROUND);
+        var pts = [6, 2.5, 6, 19.5, 10.2, 15.4, 13.2, 21.5, 16, 20.2, 13, 14.2, 18.8, 14.2];
+        g.moveTo(pts[0] * s, pts[1] * s);
+        var i = 2;
+        while (i < pts.length)
+        {
+          g.lineTo(pts[i] * s, pts[i + 1] * s);
+          i += 2;
+        }
+        g.lineTo(pts[0] * s, pts[1] * s);
+        g.lineStyle();
+      case 'transform':
+        g.lineStyle(1.6 * s, c, a);
+        g.drawRect(5 * s, 5 * s, 14 * s, 14 * s);
+        g.lineStyle();
+        for (p in [[5, 5], [19, 5], [19, 19], [5, 19], [12, 5], [19, 12], [12, 19], [5, 12]])
+          rect(p[0] - 1.8, p[1] - 1.8, 3.6, 3.6);
+        circle(12, 12, 1.6);
+      case 'lasso':
+        g.lineStyle(2.2 * s, c, a, false, null, openfl.display.CapsStyle.ROUND, openfl.display.JointStyle.ROUND);
+        g.drawEllipse(3.5 * s, 4 * s, 17 * s, 11 * s);
+        g.moveTo(7 * s, 13.5 * s);
+        g.curveTo(4.5 * s, 18 * s, 8.5 * s, 21 * s);
+        g.lineStyle();
+        circle(8.5, 21, 1.6);
+      case 'ink':
+        rect(9, 2.5, 6, 4, 1);
+        rect(7.5, 6, 9, 3, 1);
+        rect(4.5, 9, 15, 12.5, 3);
+        ink();
+        g.beginFill(c, a);
+        g.moveTo(12 * s, 11.5 * s);
+        g.curveTo(15.6 * s, 15.6 * s, 12 * s, 18.6 * s);
+        g.curveTo(8.4 * s, 15.6 * s, 12 * s, 11.5 * s);
+        g.endFill();
+      case 'rotview':
+        arc(12, 12, 8, 210, 500, 2.4);
+        poly([3.6, 6.4, 9.6, 6.2, 5.6, 11.4]);
+        rect(9, 9, 6, 6, 1.2, 0.6);
       case 'brush':
         poly([20.6, 2.2, 22.2, 3.8, 14, 13.6, 11.8, 11.6]);
         g.beginFill(c, a);
