@@ -59,7 +59,10 @@ class AnimIO
       var path = soundPath(id, snd.id);
       if (!ModWorkspace.exists(path)) ModWorkspace.saveBytes(path, snd.toWav());
     }
-    return ModWorkspace.saveText(jsonPath(id), haxe.Json.stringify(doc.project, null, '  '));
+    // Small documents are saved readable; big ones (imported .fla files) as compact as possible.
+    var json = haxe.Json.stringify(doc.project);
+    if (json.length < 2000000) json = haxe.Json.stringify(doc.project, null, '  ');
+    return ModWorkspace.saveText(jsonPath(id), json);
   }
 
   public static function load(id:String):Null<AnimDoc>

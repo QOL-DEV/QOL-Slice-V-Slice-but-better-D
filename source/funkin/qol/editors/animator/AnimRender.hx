@@ -234,10 +234,12 @@ class AnimRender
     var key = AnimData.keyAt(layer, frame);
     if (key == null)
     {
-      // After the camera layer ends, it holds its last keyframe.
-      key = layer.frames.length > 0 ? layer.frames[layer.frames.length - 1] : null;
-      if (key == null || key.camera == null) return null;
-      return key.camera;
+      // Between and after keyframes, the camera holds the last keyframe before this frame.
+      var prev:Null<AnimKeyframe> = null;
+      for (k in layer.frames)
+        if (k.start <= frame && (prev == null || k.start > prev.start)) prev = k;
+      if (prev == null || prev.camera == null) return null;
+      return prev.camera;
     }
     var cam = key.camera ?? AnimData.defaultCamera(doc.project);
     if (key.tween == null || frame <= key.start) return cam;

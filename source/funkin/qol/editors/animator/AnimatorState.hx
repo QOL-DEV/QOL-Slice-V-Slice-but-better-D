@@ -79,8 +79,10 @@ class AnimatorState extends QOLEditorState
 
   function get_sym():AnimSymbol
   {
-    if (editPath.length == 0) return doc.main;
-    return doc.symbol(editPath[editPath.length - 1]) ?? doc.main;
+    var s = editPath.length == 0 ? doc.main : (doc.symbol(editPath[editPath.length - 1]) ?? doc.main);
+    // Undo steps save the symbol being edited again each time (others reuse their last copy).
+    doc.setEditing(s.id);
+    return s;
   }
 
   public var frame:Int = 0;
@@ -536,6 +538,7 @@ class AnimatorState extends QOLEditorState
     addMenuSeparator(insert);
     addMenuItem(insert, 'New Layer', null, () -> addLayer('vector'));
     addMenuItem(insert, 'New Bitmap Layer', null, () -> addLayer('bitmap'));
+    addMenuItem(insert, 'New Folder', null, addFolder);
     addMenuItem(insert, 'Add Camera', null, () -> addCamera());
     addMenuItem(insert, 'Add Sound...', null, () -> AnimImport.importAudio(this));
     addMenuItem(insert, 'Delete Layer', null, deleteLayer);
@@ -972,6 +975,8 @@ class AnimatorState extends QOLEditorState
   {
     doc = d;
     doc.onChange = onDocChanged;
+    // Save the first undo step's pieces now, so the first edit isn't slow on a big document.
+    doc.snapshot();
     renderer = new AnimRender(doc);
     audio.stopAll();
     editPath = [];
@@ -1658,9 +1663,19 @@ class AnimatorState extends QOLEditorState
   {
     var layer = currentLayer();
     if (layer == null) return null;
-    if (layer.locked)
+    if (layer.kind == 'folder')
     {
-      setStatus('This layer is locked.');
+      setStatus('That\'s a folder: pick a layer inside it to draw on.');
+      return null;
+    }
+    if (AnimData.isLocked(sym, curLayer))
+    {
+      setStatus(layer.locked ? 'This layer is locked.' : 'This layer\'s folder is locked.');
+      return null;
+    }
+    if (AnimData.isHidden(sym, curLayer) && layer.visible)
+    {
+      setStatus('This layer\'s folder is hidden.');
       return null;
     }
     if (!layer.visible)
@@ -2407,7 +2422,7 @@ class AnimatorState extends QOLEditorState
     for (h in hits)
     {
       var layer = sym.layers[h.layer];
-      if (layer == null || layer.locked || !layer.visible) continue;
+      if (layer == null || AnimData.isLocked(sym, h.layer) || AnimData.isHidden(sym, h.layer)) continue;
       if (h.obj.hitTestPoint(stageX, stageY, true)) return {layer: h.layer, element: h.element};
     }
     return best;
@@ -2971,7 +2986,7 @@ class AnimatorState extends QOLEditorState
     for (li in 0...sym.layers.length)
     {
       var layer = sym.layers[li];
-      if (layer.locked || !layer.visible || layer.kind != 'vector') continue;
+      if (AnimData.isLocked(sym, li) || AnimData.isHidden(sym, li) || layer.kind != 'vector') continue;
       var key = AnimData.keyAt(layer, frame);
       if (key == null) continue;
       var i = key.elements.length - 1;
@@ -3561,7 +3576,7 @@ class AnimatorState extends QOLEditorState
     for (li in 0...sym.layers.length)
     {
       var layer = sym.layers[li];
-      if (layer.locked || !layer.visible) continue;
+      if (AnimData.isLocked(sym, li) || AnimData.isHidden(sym, li)) continue;
       var key = AnimData.keyAt(layer, frame);
       if (key == null) continue;
       for (ei in 0...key.elements.length)
@@ -3803,6 +3818,7 @@ class AnimatorState extends QOLEditorState
         if (n == null || n == '') return;
         doc.checkpoint();
         s.name = n;
+        doc.touch(s.id);
         doc.changed();
       });
     }
@@ -3839,6 +3855,7 @@ class AnimatorState extends QOLEditorState
     if (id == null) return;
     confirm('Delete', 'Delete this from the library? Every placed copy is removed too.', () -> {
       doc.checkpoint();
+      doc.touchAll();
       var key = id.substr(4);
       var isSym = StringTools.startsWith(id, 'sym:');
       if (isSym) doc.project.symbols = [for (s in doc.project.symbols) if (s.id != key) s];
@@ -3880,20 +3897,130 @@ class AnimatorState extends QOLEditorState
       layer.frames[0].bitmap = doc.newCanvas();
       setCanvasPos(layer.frames[0]);
     }
-    sym.layers.insert(curLayer, layer);
+    // Above the selected layer, in the same folder.
+    var at = Std.int(Math.max(0, Math.min(sym.layers.length, curLayer)));
+    var near = sym.layers[at];
+    if (near != null && AnimData.depthOf(near) > 0) layer.depth = near.depth;
+    sym.layers.insert(at, layer);
+    curLayer = at;
     selection = [];
     doc.changed();
   }
 
+  /**
+   * A new folder above the selected layer, with the selected layer (and what it holds) inside.
+   */
+  public function addFolder():Void
+  {
+    doc.checkpoint();
+    var count = 1;
+    for (l in sym.layers)
+      if (l.kind == 'folder') count++;
+    var folder = AnimData.newLayer('Folder $count', 'folder', sym.layers.length);
+    folder.frames = [];
+    var at = Std.int(Math.max(0, Math.min(sym.layers.length, curLayer)));
+    var near = sym.layers[at];
+    var depth = near != null ? AnimData.depthOf(near) : 0;
+    if (depth > 0) folder.depth = depth;
+    if (near != null)
+    {
+      var end = AnimData.subtreeEnd(sym, at);
+      for (j in at...end)
+        sym.layers[j].depth = AnimData.depthOf(sym.layers[j]) + 1;
+    }
+    sym.layers.insert(at, folder);
+    curLayer = at;
+    selection = [];
+    doc.changed();
+  }
+
+  /**
+   * Make a layer a mask for the layer right below it (or stop it being one).
+   */
+  public function toggleMask(i:Int):Void
+  {
+    var layer = sym.layers[i];
+    if (layer == null || layer.kind == 'folder' || layer.kind == 'camera' || layer.kind == 'audio') return;
+    doc.checkpoint();
+    if (layer.mask == true)
+    {
+      // Its layers move back up a level.
+      var end = AnimData.subtreeEnd(sym, i);
+      for (j in i + 1...end)
+        sym.layers[j].depth = AnimData.depthOf(sym.layers[j]) - 1;
+      layer.mask = null;
+      layer.collapsed = null;
+    }
+    else
+    {
+      layer.mask = true;
+      // Lock it so the mask shows (like Animate).
+      layer.locked = true;
+      var below = i + 1;
+      if (below < sym.layers.length && AnimData.depthOf(sym.layers[below]) == AnimData.depthOf(layer)
+        && sym.layers[below].kind != 'camera')
+      {
+        var end = AnimData.subtreeEnd(sym, below);
+        for (j in below...end)
+          sym.layers[j].depth = AnimData.depthOf(sym.layers[j]) + 1;
+      }
+    }
+    AnimData.fixDepths(sym);
+    doc.changed();
+  }
+
+  /**
+   * Move a layer (and what it holds) out of its folder or mask, to just below it.
+   */
+  public function moveOutOfFolder(i:Int):Void
+  {
+    var parent = AnimData.parentOf(sym, i);
+    if (parent < 0) return;
+    doc.checkpoint();
+    var end = AnimData.subtreeEnd(sym, i);
+    var block = sym.layers.splice(i, end - i);
+    for (l in block)
+      l.depth = AnimData.depthOf(l) - 1;
+    var after = AnimData.subtreeEnd(sym, parent);
+    for (j in 0...block.length)
+      sym.layers.insert(after + j, block[j]);
+    for (l in block)
+      if (l.depth == 0) l.depth = null;
+    curLayer = after;
+    selection = [];
+    doc.changed();
+  }
+
+  /**
+   * Frame commands do nothing on folders (they have no frames).
+   */
+  function onFolder():Bool
+  {
+    if (currentLayer()?.kind != 'folder') return false;
+    setStatus('Folders have no frames of their own: pick a layer inside it.');
+    return true;
+  }
+
+  public function toggleCollapsed(i:Int):Void
+  {
+    var l = sym.layers[i];
+    if (l == null || !AnimData.isGroup(l)) return;
+    l.collapsed = l.collapsed == true ? null : true;
+    dirty = true;
+  }
+
   function deleteLayer():Void
   {
-    if (sym.layers.length <= 1)
+    var end = AnimData.subtreeEnd(sym, curLayer);
+    if (sym.layers.length - (end - curLayer) < 1)
     {
       notify('Last layer', 'A timeline needs at least one layer.');
       return;
     }
     doc.checkpoint();
-    sym.layers.splice(curLayer, 1);
+    // A folder or mask goes with everything in it.
+    sym.layers.splice(curLayer, end - curLayer);
+    curLayer = Std.int(Math.min(curLayer, sym.layers.length - 1));
     selection = [];
     doc.changed();
   }
@@ -3903,20 +4030,52 @@ class AnimatorState extends QOLEditorState
     var layer = currentLayer();
     if (layer == null) return;
     doc.checkpoint();
-    var copy:AnimLayer = AnimData.copy(layer);
-    copy.name = layer.name + ' copy';
-    sym.layers.insert(curLayer, copy);
+    var end = AnimData.subtreeEnd(sym, curLayer);
+    var copies:Array<AnimLayer> = [for (j in curLayer...end) AnimData.copy(sym.layers[j])];
+    copies[0].name = layer.name + ' copy';
+    for (j in 0...copies.length)
+      sym.layers.insert(curLayer + j, copies[j]);
     doc.changed();
   }
 
+  /**
+   * Drag a layer (with what it holds) onto another layer's row: it goes above that layer when moving up, below it
+   * when moving down (inside it if it's an open folder or mask).
+   */
   public function moveLayer(from:Int, to:Int):Void
   {
-    if (from == to || to < 0 || to >= sym.layers.length) return;
+    if (from == to || to < 0 || to >= sym.layers.length || from < 0 || from >= sym.layers.length) return;
+    var end = AnimData.subtreeEnd(sym, from);
+    if (to > from && to < end) return; // into itself
+    var target = sym.layers[to];
+    var pos:Int, depth:Int;
+    if (to < from)
+    {
+      pos = to;
+      depth = AnimData.depthOf(target);
+    }
+    else if (AnimData.isGroup(target) && target.collapsed != true)
+    {
+      pos = to + 1;
+      depth = AnimData.depthOf(target) + 1;
+    }
+    else
+    {
+      pos = AnimData.subtreeEnd(sym, to);
+      depth = AnimData.depthOf(target);
+    }
     doc.checkpoint();
-    var l = sym.layers[from];
-    sym.layers.splice(from, 1);
-    sym.layers.insert(to, l);
-    curLayer = to;
+    var block = sym.layers.splice(from, end - from);
+    if (pos > from) pos -= block.length;
+    var delta = depth - AnimData.depthOf(block[0]);
+    for (j in 0...block.length)
+    {
+      var d = AnimData.depthOf(block[j]) + delta;
+      block[j].depth = d <= 0 ? null : d;
+      sym.layers.insert(pos + j, block[j]);
+    }
+    AnimData.fixDepths(sym);
+    curLayer = pos;
     selection = [];
     doc.changed();
   }
@@ -3932,7 +4091,7 @@ class AnimatorState extends QOLEditorState
       case 'locked': l.locked = !l.locked;
       default: l.outline = !(l.outline == true);
     }
-    selection = [for (s in selection) if (s.layer != i || (l.visible && !l.locked)) s];
+    selection = [for (s in selection) if (!AnimData.isLocked(sym, s.layer) && !AnimData.isHidden(sym, s.layer)) s];
     doc.changed();
   }
 
@@ -4005,6 +4164,7 @@ class AnimatorState extends QOLEditorState
    */
   function insertFrames(n:Int):Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     doc.checkpoint();
@@ -4025,6 +4185,7 @@ class AnimatorState extends QOLEditorState
 
   function removeFrames():Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     var a = Std.int(Math.min(selStart, selEnd)), b = Std.int(Math.max(selStart, selEnd));
@@ -4061,6 +4222,7 @@ class AnimatorState extends QOLEditorState
    */
   function insertKeyframe(blank:Bool):Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     var camNow = layer.kind == 'camera' ? AnimData.copy(renderer.cameraAt(sym, frame) ?? AnimData.defaultCamera(doc.project)) : null;
@@ -4108,6 +4270,7 @@ class AnimatorState extends QOLEditorState
 
   function clearKeyframe():Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     var idx = AnimData.keyIndexAt(layer, frame);
@@ -4122,6 +4285,7 @@ class AnimatorState extends QOLEditorState
 
   function setTween(on:Bool):Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     var a = Std.int(Math.min(selStart, selEnd)), b = Std.int(Math.max(selStart, selEnd));
@@ -4147,6 +4311,7 @@ class AnimatorState extends QOLEditorState
 
   function reverseFrames():Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     doc.checkpoint();
@@ -4187,6 +4352,7 @@ class AnimatorState extends QOLEditorState
 
   function copyFrames():Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null) return;
     var a = Std.int(Math.min(selStart, selEnd)), b = Std.int(Math.max(selStart, selEnd));
@@ -4203,6 +4369,7 @@ class AnimatorState extends QOLEditorState
 
   function pasteFrames():Void
   {
+    if (onFolder()) return;
     var layer = currentLayer();
     if (layer == null || frameClipboard == null) return;
     var frames:Array<Dynamic> = haxe.Json.parse(frameClipboard);
@@ -4334,7 +4501,23 @@ class AnimatorState extends QOLEditorState
     addMenuSeparator(menu);
     addMenuItem(menu, 'New Layer', null, () -> addLayer('vector'));
     addMenuItem(menu, 'New Paint Layer', null, () -> addLayer('bitmap'));
+    addMenuItem(menu, 'New Folder (with this layer in it)', null, addFolder);
     addMenuItem(menu, 'Add Sound...', null, () -> AnimImport.importAudio(this));
+    addMenuSeparator(menu);
+    if (layer.kind != 'folder' && layer.kind != 'camera' && layer.kind != 'audio')
+      addMenuCheck(menu, 'Mask (cuts out the layer below)', layer.mask == true, _ -> toggleMask(row));
+    if (AnimData.parentOf(sym, row) >= 0) addMenuItem(menu, 'Move Out of Folder', null, () -> moveOutOfFolder(row));
+    if (AnimData.isGroup(layer)) addMenuItem(menu, layer.collapsed == true ? 'Expand' : 'Collapse', null, () -> toggleCollapsed(row));
+    addMenuItem(menu, 'Expand All', null, () -> {
+      for (l in sym.layers)
+        l.collapsed = null;
+      dirty = true;
+    });
+    addMenuItem(menu, 'Collapse All', null, () -> {
+      for (l in sym.layers)
+        if (AnimData.isGroup(l)) l.collapsed = true;
+      dirty = true;
+    });
     addMenuSeparator(menu);
     addMenuCheck(menu, 'Visible', layer.visible, _ -> toggleLayer(row, 'visible'));
     addMenuCheck(menu, 'Locked', layer.locked, _ -> toggleLayer(row, 'locked'));

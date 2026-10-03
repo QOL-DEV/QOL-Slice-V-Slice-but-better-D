@@ -7,6 +7,7 @@ import funkin.qol.util.QOLFilePicker.QOLPickedFile;
 import funkin.qol.util.QOLInflate;
 import funkin.qol.util.QOLXml;
 import funkin.qol.util.QOLXml.QOLXmlNode;
+import funkin.qol.util.QOLXml.QOLXmlParser;
 import haxe.io.Bytes;
 import haxe.io.BytesInput;
 import openfl.display.BitmapData;
@@ -140,18 +141,10 @@ private class XFLSource
 
   function readZip(bytes:Bytes):Void
   {
-    // Animate's own ZIP writer gets the central directory's size wrong, so read the local headers in order. Entries
-    // point into the file's bytes (no copies).
-    if (!readLocalHeaders(bytes))
-    {
-      entries = new Map();
-      var list = haxe.zip.Reader.readZip(new BytesInput(bytes));
-      for (e in list)
-      {
-        if (StringTools.endsWith(e.fileName, '/')) continue;
-        entries.set(key(e.fileName), {data: e.data, pos: 0, len: e.data.length, compressed: e.compressed});
-      }
-    }
+    // Entries point into the file's bytes (no copies). Animate's own ZIP writer gets the central directory's size
+    // wrong; QOLZip copes with that.
+    for (e in funkin.qol.util.QOLZip.entries(bytes))
+      if (!StringTools.endsWith(e.name, '/')) entries.set(key(e.name), {data: bytes, pos: e.pos, len: e.len, compressed: e.compressed});
     // A zipped .xfl folder.
     if (!exists('DOMDocument.xml'))
     {
@@ -168,36 +161,6 @@ private class XFLSource
         }
       }
     }
-  }
-
-  function readLocalHeaders(b:Bytes):Bool
-  {
-    var pos = 0;
-    var n = b.length;
-    var any = false;
-    while (pos + 30 <= n && b.getInt32(pos) == 0x04034b50)
-    {
-      var flags = b.getUInt16(pos + 6), method = b.getUInt16(pos + 8);
-      var csize = b.getInt32(pos + 18);
-      var nlen = b.getUInt16(pos + 26), elen = b.getUInt16(pos + 28);
-      // Sizes written after the data: only the central directory knows them.
-      if ((flags & 8) != 0 && csize == 0) return false;
-      var name:String;
-      try
-      {
-        name = b.getString(pos + 30, nlen);
-      }
-      catch (e:Dynamic)
-      {
-        name = AnimSound.ascii(b, pos + 30, nlen);
-      }
-      var dataPos = pos + 30 + nlen + elen;
-      if (csize < 0 || dataPos + csize > n) return any;
-      if (!StringTools.endsWith(name, '/')) entries.set(key(name), {data: b, pos: dataPos, len: csize, compressed: method == 8});
-      pos = dataPos + csize;
-      any = true;
-    }
-    return any;
   }
 
   public function exists(path:String):Bool
@@ -295,15 +258,25 @@ private class XFLReader
 
   function progress(text:String):Void
   {
-    if (onProgress != null) onProgress(stepCount == 0 ? 0 : stepsDone / stepCount, text);
+    if (onProgress != null) onProgress(READ_SHARE + (1 - READ_SHARE) * (stepCount == 0 ? 0 : stepsDone / stepCount), text);
   }
 
   /**
    * Run the next step after letting the screen update.
    */
+  var lastPause:Float = 0;
+
   function next():Void
   {
     if (failed) return;
+    // Steps run back to back, with a short pause now and then so the screen can update.
+    var now = haxe.Timer.stamp();
+    var wait = 0;
+    if (now - lastPause > 0.05)
+    {
+      wait = 16;
+      lastPause = now + 0.016;
+    }
     haxe.Timer.delay(() -> {
       if (failed) return;
       if (steps.length == 0) return;
@@ -317,7 +290,7 @@ private class XFLReader
       {
         fail('$e');
       }
-    }, 0);
+    }, wait);
   }
 
   public function cancel():Void
@@ -340,21 +313,43 @@ private class XFLReader
         fail('Could not read DOMDocument.xml.');
         return;
       }
-      try
+      // Big documents are read a slice at a time so the progress bar keeps moving.
+      var parser = new QOLXmlParser(bytes);
+      bytes = null;
+      function chunk()
       {
-        var root = QOLXml.parse(bytes);
-        dom = root.child('DOMDocument');
-        if (dom == null) throw 'This isn\'t an Animate document (no DOMDocument).';
-        plan();
+        if (failed) return;
+        try
+        {
+          var t0 = haxe.Timer.stamp();
+          var done = false;
+          while (!done && haxe.Timer.stamp() - t0 < 0.06)
+            done = parser.step(1 << 19);
+          if (!done)
+          {
+            if (onProgress != null) onProgress(parser.progress * READ_SHARE, 'Reading the document... ${Std.int(parser.progress * 100)}%');
+            haxe.Timer.delay(chunk, 1);
+            return;
+          }
+          dom = parser.root.child('DOMDocument');
+          if (dom == null) throw 'This isn\'t an Animate document (no DOMDocument).';
+          plan();
+        }
+        catch (e:Dynamic)
+        {
+          fail('$e');
+          return;
+        }
+        next();
       }
-      catch (e:Dynamic)
-      {
-        fail('$e');
-        return;
-      }
-      next();
+      chunk();
     });
   }
+
+  /**
+   * How much of the progress bar reading the XML takes.
+   */
+  static inline final READ_SHARE:Float = 0.25;
 
   function plan():Void
   {
@@ -453,8 +448,13 @@ private class XFLReader
     steps = [];
     src = null;
     doc.clearHistory();
-    if (onProgress != null) onProgress(1, 'Done');
-    onDone(doc, warnings);
+    // Ready the undo history (the first save of a big document takes a moment).
+    if (onProgress != null) onProgress(1, 'Getting the timeline ready...');
+    haxe.Timer.delay(() -> {
+      if (failed) return;
+      doc.snapshot();
+      onDone(doc, warnings);
+    }, 16);
   }
 
   //

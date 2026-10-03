@@ -146,7 +146,9 @@ class AnimExport
     var path = 'export/' + AnimIO.fileId(ed.doc.project.name) + '.fla';
     formDialog('Export Adobe Animate File', 'Export', form -> {
       form.textField('Save as (in your mod)', () -> path, v -> path = v);
-      form.note('Layers, keyframes, symbols, classic tweens and eases, vector shapes and images. Open it in Animate CC.');
+      form.note('Everything Animate understands: symbols, layers (folders, masks, guides, the camera), keyframes and labels, '
+        + 'classic and shape tweens with their eases, shapes, images, sounds, color effects, filters and blend modes. '
+        + 'Paint layers become images. Opens in Adobe Animate.');
     }, () -> {
       var bytes = XFLFile.write(ed.doc);
       var saved = ModWorkspace.saveBytes(path, bytes);

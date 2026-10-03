@@ -71,6 +71,17 @@ class AnimTimelineView extends FlxGroup
   var gGuide:FlxGraphic;
   var gCamera:FlxGraphic;
   var gSound:FlxGraphic;
+  var gFolder:FlxGraphic;
+  var gFolderOpen:FlxGraphic;
+  var gMask:FlxGraphic;
+  var gMasked:FlxGraphic;
+  var gTriRight:FlxGraphic;
+  var gTriDown:FlxGraphic;
+
+  /**
+   * The layer shown on each row (folders and masks can be collapsed).
+   */
+  var rowsList:Array<Int> = [];
 
   /**
    * Set when sound timing changes (waveforms are redrawn).
@@ -114,6 +125,12 @@ class AnimTimelineView extends FlxGroup
     gGuide = AnimatorSkin.iconGraphic('guide', 14, 0xFFFFFFFF, false);
     gCamera = AnimatorSkin.iconGraphic('camera', 14, 0xFFFFFFFF, false);
     gSound = AnimatorSkin.iconGraphic('sound', 14, 0xFFFFFFFF, false);
+    gFolder = AnimatorSkin.iconGraphic('folder', 14, 0xFFFFFFFF, false);
+    gFolderOpen = AnimatorSkin.iconGraphic('folder-open', 14, 0xFFFFFFFF, false);
+    gMask = AnimatorSkin.iconGraphic('mask', 14, 0xFFFFFFFF, false);
+    gMasked = AnimatorSkin.iconGraphic('masked', 14, 0xFFFFFFFF, false);
+    gTriRight = AnimatorSkin.iconGraphic('tri-right', 10, 0xFFFFFFFF, false);
+    gTriDown = AnimatorSkin.iconGraphic('tri-down', 10, 0xFFFFFFFF, false);
     gArrow = QOLTheme.cached('anim-tween-arrow', () -> {
       var sh = new Shape();
       sh.graphics.beginFill(0xFFFFFF, 1);
@@ -354,6 +371,7 @@ class AnimTimelineView extends FlxGroup
     place(rulerBg, gridX, y, width - LABEL_W, RULER_H);
     place(divider, gridX - 1, y, 1, height);
     title.setPosition(x + 10, y + 4);
+    rowsList = AnimData.visibleRows(sym);
     var layerCount = sym.layers.length;
     var sub = '$layerCount layer${layerCount == 1 ? '' : 's'} \u00B7 ${AnimData.symbolLength(sym)}f';
     if (subtitle.text != sub) subtitle.text = sub;
@@ -395,27 +413,48 @@ class AnimTimelineView extends FlxGroup
     var lengthAll = AnimData.symbolLength(sym);
     for (r in 0...rows)
     {
-      var li = scrollRow + r;
-      if (li >= sym.layers.length) break;
+      var ri = scrollRow + r;
+      if (ri >= rowsList.length) break;
+      var li = rowsList[ri];
       var layer = sym.layers[li];
-      var ry = rowY(li);
+      var ry = rowY(ri);
       if (ry + ROW_H > bottom + 1) break;
       var selected = li == ed.curLayer;
+      var folder = layer.kind == 'folder';
       var baseBg:Int = r % 2 == 0 ? AnimatorSkin.TL_ROW_A : AnimatorSkin.TL_ROW_B;
+      if (folder) baseBg = mix(baseBg, layer.color, 0.1);
       var rowColor:Int = selected ? mix(baseBg, layer.color, 0.22) : baseBg;
       var rowBg = pooled(rowBgs, nRow++, layerRows, () -> new FlxSprite().makeGraphic(1, 1, FlxColor.WHITE));
       place(rowBg, x, ry, width, ROW_H - 1);
       rowBg.color = rowColor;
 
-      // Label column.
+      // Label column: color bar, nesting, open/close arrow, icon, name, toggles.
       span(x + 4, ry + 3, 4, ROW_H - 7, layer.color);
       if (selected) span(x + 8, ry + 3, 2, ROW_H - 7, layer.color, 0.35);
-      var kindIcon = layer.kind == 'camera' ? gCamera : (layer.kind == 'audio' ? gSound : (layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : gPen)));
-      icon(kindIcon, x + 14, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
-      txt(x + 33, ry + 4, LABEL_W - 100, layer.name, 12, selected ? FlxColor.WHITE : (layer.visible ? AnimatorSkin.TEXT_SOFT : AnimatorSkin.TEXT_FAINT));
+      var lx = labelX(layer);
+      var parent = AnimData.parentOf(sym, li);
+      var inMask = parent >= 0 && sym.layers[parent].mask == true;
+      if (AnimData.isGroup(layer)) icon(layer.collapsed == true ? gTriRight : gTriDown, lx, ry + 7, AnimatorSkin.TEXT_SOFT);
+      var kindIcon = folder ? (layer.collapsed == true ? gFolder : gFolderOpen) : (layer.mask == true ? gMask : (layer.kind == 'camera' ? gCamera : (layer.kind == 'audio' ? gSound : (layer.guide == true ? gGuide : (layer.kind == 'bitmap' ? gPixels : (inMask ? gMasked : gPen))))));
+      icon(kindIcon, lx + 12, ry + 5, mix(layer.color, 0xFFFFFFFF, 0.25));
+      var hidden = AnimData.isHidden(sym, li);
+      txt(lx + 31, ry + 4, Math.max(30, x + LABEL_W - 66 - (lx + 31)), layer.name, 12, selected ? FlxColor.WHITE : (!hidden ? AnimatorSkin.TEXT_SOFT : AnimatorSkin.TEXT_FAINT));
       icon(layer.visible ? gEyeOn : gEyeOff, x + LABEL_W - 60, ry + 5);
       icon(layer.locked ? gLockOn : gLockOff, x + LABEL_W - 41, ry + 5);
-      icon(layer.outline == true ? gOutline : gSquare, x + LABEL_W - 22, ry + 5, layer.color);
+      if (!folder) icon(layer.outline == true ? gOutline : gSquare, x + LABEL_W - 22, ry + 5, layer.color);
+      if (folder)
+      {
+        // Folders have no frames: show where their layers have content.
+        var end = AnimData.subtreeEnd(sym, li);
+        var len = 0;
+        for (j in li + 1...end)
+          len = Std.int(Math.max(len, AnimData.layerLength(sym.layers[j])));
+        var sx = Math.max(gridX, frameX(0) + 1);
+        var ex = Math.min(x + width, frameX(len));
+        if (ex > sx) span(sx, ry + ROW_H / 2 - 2, ex - sx - 1, 4, mix(rowColor, layer.color, 0.45));
+        if (hoverRow == ri && hoverFrame >= 0) span(frameX(hoverFrame), ry, cellW, ROW_H - 1, 0xFFFFFFFF, 0.05);
+        continue;
+      }
 
       // Frame selection.
       if (selected && ed.selEnd >= ed.selStart)
@@ -465,11 +504,11 @@ class AnimTimelineView extends FlxGroup
       if (layer.kind == 'audio') drawWave(layer, ry);
 
       // Hover cell.
-      if (hoverRow == li && hoverFrame >= 0) span(frameX(hoverFrame), ry, cellW, ROW_H - 1, 0xFFFFFFFF, 0.08);
+      if (hoverRow == ri && hoverFrame >= 0) span(frameX(hoverFrame), ry, cellW, ROW_H - 1, 0xFFFFFFFF, 0.08);
     }
 
     // "+ New layer" row and tips in the empty space below the layers.
-    var nextRow = sym.layers.length;
+    var nextRow = rowsList.length;
     var ny = rowY(nextRow);
     if (nextRow >= scrollRow && ny + ROW_H <= bottom)
     {
@@ -569,6 +608,12 @@ class AnimTimelineView extends FlxGroup
   // Mouse
   //
 
+  /**
+   * Where a layer's open/close arrow goes (its icon and name follow), indented by how deeply it's nested.
+   */
+  inline function labelX(layer:AnimLayer):Float
+    return x + 12 + Math.min(6, AnimData.depthOf(layer)) * 12;
+
   public function contains(mx:Float, my:Float):Bool
     return mx >= x && mx < x + width && my >= y && my < y + height;
 
@@ -578,6 +623,7 @@ class AnimTimelineView extends FlxGroup
   public function handleMouse(mx:Float, my:Float):Bool
   {
     var sym = ed.sym;
+    rowsList = AnimData.visibleRows(sym);
     if (drag != '')
     {
       if (FlxG.mouse.pressed)
@@ -599,10 +645,10 @@ class AnimTimelineView extends FlxGroup
             }
           case 'layer':
             var r = rowAt(my);
-            if (r >= 0 && r < sym.layers.length && r != dragLayer)
+            if (r >= 0 && r < rowsList.length && rowsList[r] != dragLayer)
             {
-              ed.moveLayer(dragLayer, r);
-              dragLayer = r;
+              ed.moveLayer(dragLayer, rowsList[r]);
+              dragLayer = ed.curLayer;
             }
         }
         autoScroll(mx);
@@ -621,14 +667,16 @@ class AnimTimelineView extends FlxGroup
     if (FlxG.mouse.wheel != 0)
     {
       if (FlxG.keys.pressed.CONTROL) cellW = Math.max(6, Math.min(40, cellW + (FlxG.mouse.wheel > 0 ? 2 : -2)));
-      else if (FlxG.keys.pressed.SHIFT || mx < gridX) scrollRow = Std.int(Math.max(0, Math.min(sym.layers.length - 1, scrollRow - FlxG.mouse.wheel)));
+      else if (FlxG.keys.pressed.SHIFT || mx < gridX) scrollRow = Std.int(Math.max(0, Math.min(rowsList.length - 1, scrollRow - FlxG.mouse.wheel)));
       else
         scrollFrame = Std.int(Math.max(0, scrollFrame - FlxG.mouse.wheel * 3));
     }
 
     if (!FlxG.mouse.justPressed && !FlxG.mouse.justPressedRight) return true;
 
-    var row = rowAt(my);
+    var rowIdx = rowAt(my);
+    // The layer on that row (or the layer count for the "New layer" row below the last one).
+    var row = rowIdx >= 0 && rowIdx < rowsList.length ? rowsList[rowIdx] : (rowIdx == rowsList.length ? sym.layers.length : -1);
     var onRuler = my < y + RULER_H;
     if (onRuler && mx >= gridX)
     {
@@ -657,9 +705,11 @@ class AnimTimelineView extends FlxGroup
         ed.openLayerMenu(row);
         return true;
       }
-      if (mx >= x + LABEL_W - 60 && mx < x + LABEL_W - 42) ed.toggleLayer(row, 'visible');
+      var lx = labelX(layer);
+      if (AnimData.isGroup(layer) && mx >= lx - 3 && mx < lx + 12) ed.toggleCollapsed(row);
+      else if (mx >= x + LABEL_W - 60 && mx < x + LABEL_W - 42) ed.toggleLayer(row, 'visible');
       else if (mx >= x + LABEL_W - 42 && mx < x + LABEL_W - 24) ed.toggleLayer(row, 'locked');
-      else if (mx >= x + LABEL_W - 24) ed.toggleLayer(row, 'outline');
+      else if (mx >= x + LABEL_W - 24 && layer.kind != 'folder') ed.toggleLayer(row, 'outline');
       else
       {
         var now = haxe.Timer.stamp();
@@ -678,6 +728,14 @@ class AnimTimelineView extends FlxGroup
 
     var f = Std.int(Math.max(0, frameAt(mx)));
     var layer = sym.layers[row];
+    if (layer.kind == 'folder')
+    {
+      // Folders have no frames of their own.
+      ed.selectLayer(row);
+      ed.setFrame(f, false);
+      if (FlxG.mouse.justPressedRight) ed.openLayerMenu(row);
+      return true;
+    }
     if (FlxG.mouse.justPressedRight)
     {
       ed.selectLayer(row);

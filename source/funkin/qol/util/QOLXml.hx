@@ -13,165 +13,19 @@ class QOLXml
    */
   public static function parse(b:Bytes):QOLXmlNode
   {
-    var root = new QOLXmlNode('#document');
-    var stack:Array<QOLXmlNode> = [root];
-    var len = b.length;
-    var pos = 0;
-    // Skip a UTF-8 byte order mark.
-    if (len >= 3 && b.get(0) == 0xEF && b.get(1) == 0xBB && b.get(2) == 0xBF) pos = 3;
-    while (pos < len)
-    {
-      var c = b.get(pos);
-      if (c != '<'.code)
-      {
-        // Text up to the next tag.
-        var start = pos;
-        while (pos < len && b.get(pos) != '<'.code)
-          pos++;
-        if (!isBlank(b, start, pos))
-        {
-          var top = stack[stack.length - 1];
-          var t = decode(str(b, start, pos - start));
-          top.text = top.text == null ? t : top.text + t;
-        }
-        continue;
-      }
-      var next = pos + 1 < len ? b.get(pos + 1) : 0;
-      if (next == '?'.code)
-      {
-        pos = indexOf2(b, pos + 2, '?'.code, '>'.code, len) + 2;
-        continue;
-      }
-      if (next == '!'.code)
-      {
-        if (pos + 3 < len && b.get(pos + 2) == '-'.code && b.get(pos + 3) == '-'.code)
-        {
-          // Comment.
-          var p = pos + 4;
-          while (p + 2 < len && !(b.get(p) == '-'.code && b.get(p + 1) == '-'.code && b.get(p + 2) == '>'.code))
-            p++;
-          pos = p + 3;
-          continue;
-        }
-        if (pos + 8 < len && b.get(pos + 2) == '['.code && b.getString(pos + 2, 7) == '[CDATA[')
-        {
-          var start = pos + 9;
-          var p = start;
-          while (p + 2 < len && !(b.get(p) == ']'.code && b.get(p + 1) == ']'.code && b.get(p + 2) == '>'.code))
-            p++;
-          var top = stack[stack.length - 1];
-          var t = str(b, start, p - start);
-          top.text = top.text == null ? t : top.text + t;
-          pos = p + 3;
-          continue;
-        }
-        // DOCTYPE and the like.
-        while (pos < len && b.get(pos) != '>'.code)
-          pos++;
-        pos++;
-        continue;
-      }
-      if (next == '/'.code)
-      {
-        // Closing tag.
-        while (pos < len && b.get(pos) != '>'.code)
-          pos++;
-        pos++;
-        if (stack.length > 1) stack.pop();
-        continue;
-      }
-      // Opening tag: name, attributes, then '>' or '/>'.
-      pos++;
-      var nameStart = pos;
-      while (pos < len)
-      {
-        var ch = b.get(pos);
-        if (ch <= 32 || ch == '/'.code || ch == '>'.code) break;
-        pos++;
-      }
-      var node = new QOLXmlNode(b.getString(nameStart, pos - nameStart));
-      var parent = stack[stack.length - 1];
-      parent.children.push(node);
-      var selfClosing = false;
-      while (pos < len)
-      {
-        var ch = b.get(pos);
-        if (ch <= 32)
-        {
-          pos++;
-          continue;
-        }
-        if (ch == '>'.code)
-        {
-          pos++;
-          break;
-        }
-        if (ch == '/'.code)
-        {
-          selfClosing = true;
-          pos++;
-          continue;
-        }
-        // Attribute.
-        var an = pos;
-        while (pos < len)
-        {
-          var ac = b.get(pos);
-          if (ac == '='.code || ac <= 32 || ac == '>'.code || ac == '/'.code) break;
-          pos++;
-        }
-        var attrName = b.getString(an, pos - an);
-        while (pos < len && b.get(pos) <= 32)
-          pos++;
-        if (pos < len && b.get(pos) == '='.code)
-        {
-          pos++;
-          while (pos < len && b.get(pos) <= 32)
-            pos++;
-          var quote = b.get(pos);
-          if (quote == '"'.code || quote == "'".code)
-          {
-            pos++;
-            var vs = pos;
-            var amp = false;
-            while (pos < len && b.get(pos) != quote)
-            {
-              if (b.get(pos) == '&'.code) amp = true;
-              pos++;
-            }
-            var v = str(b, vs, pos - vs);
-            node.attrs.push(attrName);
-            node.attrs.push(amp ? decode(v) : v);
-            pos++;
-          }
-          else
-          {
-            var vs = pos;
-            while (pos < len && b.get(pos) > 32 && b.get(pos) != '>'.code)
-              pos++;
-            node.attrs.push(attrName);
-            node.attrs.push(str(b, vs, pos - vs));
-          }
-        }
-        else
-        {
-          node.attrs.push(attrName);
-          node.attrs.push('');
-        }
-      }
-      if (!selfClosing) stack.push(node);
-    }
-    return root;
+    var p = new QOLXmlParser(b);
+    while (!p.step(0x7FFFFFFF)) {}
+    return p.root;
   }
 
-  static function isBlank(b:Bytes, from:Int, to:Int):Bool
+  public static function isBlank(b:Bytes, from:Int, to:Int):Bool
   {
     for (i in from...to)
       if (b.get(i) > 32) return false;
     return true;
   }
 
-  static function indexOf2(b:Bytes, from:Int, c1:Int, c2:Int, len:Int):Int
+  public static function indexOf2(b:Bytes, from:Int, c1:Int, c2:Int, len:Int):Int
   {
     var p = from;
     while (p + 1 < len && !(b.get(p) == c1 && b.get(p + 1) == c2))
@@ -186,7 +40,7 @@ class QOLXml
   /**
    * UTF-8 bytes to a string (the browser's decoder is much faster for long strings).
    */
-  static inline function str(b:Bytes, pos:Int, len:Int):String
+  public static inline function str(b:Bytes, pos:Int, len:Int):String
   {
     #if js
     if (len > 24)
@@ -362,4 +216,196 @@ class QOLXmlNode
    */
   public function first():Null<QOLXmlNode>
     return children.length > 0 ? children[0] : null;
+}
+
+/**
+ * `QOLXml.parse` a piece at a time (so a big document doesn't freeze the screen): call `step` until it returns true,
+ * then read `root`.
+ */
+class QOLXmlParser
+{
+  public var root(default, null):QOLXmlNode;
+
+  var b:Bytes;
+  var len:Int;
+  var pos:Int = 0;
+  var stack:Array<QOLXmlNode>;
+
+  public function new(b:Bytes)
+  {
+    this.b = b;
+    len = b.length;
+    root = new QOLXmlNode('#document');
+    stack = [root];
+    // Skip a UTF-8 byte order mark.
+    if (len >= 3 && b.get(0) == 0xEF && b.get(1) == 0xBB && b.get(2) == 0xBF) pos = 3;
+  }
+
+  /**
+   * How far through the bytes (0..1).
+   */
+  public var progress(get, never):Float;
+
+  inline function get_progress():Float
+    return len == 0 ? 1 : pos / len;
+
+  /**
+   * Read about `bytes` more bytes. True when the whole document is read.
+   */
+  public function step(bytes:Int):Bool
+  {
+    var b = this.b, len = this.len, stack = this.stack;
+    var stop = pos + bytes;
+    if (stop < 0 || stop > len) stop = len;
+    var pos = this.pos;
+    while (pos < stop)
+    {
+      var c = b.get(pos);
+      if (c != '<'.code)
+      {
+        // Text up to the next tag.
+        var start = pos;
+        while (pos < len && b.get(pos) != '<'.code)
+          pos++;
+        if (!QOLXml.isBlank(b, start, pos))
+        {
+          var top = stack[stack.length - 1];
+          var t = QOLXml.decode(QOLXml.str(b, start, pos - start));
+          top.text = top.text == null ? t : top.text + t;
+        }
+        continue;
+      }
+      var next = pos + 1 < len ? b.get(pos + 1) : 0;
+      if (next == '?'.code)
+      {
+        pos = QOLXml.indexOf2(b, pos + 2, '?'.code, '>'.code, len) + 2;
+        continue;
+      }
+      if (next == '!'.code)
+      {
+        if (pos + 3 < len && b.get(pos + 2) == '-'.code && b.get(pos + 3) == '-'.code)
+        {
+          // Comment.
+          var p = pos + 4;
+          while (p + 2 < len && !(b.get(p) == '-'.code && b.get(p + 1) == '-'.code && b.get(p + 2) == '>'.code))
+            p++;
+          pos = p + 3;
+          continue;
+        }
+        if (pos + 8 < len && b.get(pos + 2) == '['.code && b.getString(pos + 2, 7) == '[CDATA[')
+        {
+          var start = pos + 9;
+          var p = start;
+          while (p + 2 < len && !(b.get(p) == ']'.code && b.get(p + 1) == ']'.code && b.get(p + 2) == '>'.code))
+            p++;
+          var top = stack[stack.length - 1];
+          var t = QOLXml.str(b, start, p - start);
+          top.text = top.text == null ? t : top.text + t;
+          pos = p + 3;
+          continue;
+        }
+        // DOCTYPE and the like.
+        while (pos < len && b.get(pos) != '>'.code)
+          pos++;
+        pos++;
+        continue;
+      }
+      if (next == '/'.code)
+      {
+        // Closing tag.
+        while (pos < len && b.get(pos) != '>'.code)
+          pos++;
+        pos++;
+        if (stack.length > 1) stack.pop();
+        continue;
+      }
+      // Opening tag: name, attributes, then '>' or '/>'.
+      pos++;
+      var nameStart = pos;
+      while (pos < len)
+      {
+        var ch = b.get(pos);
+        if (ch <= 32 || ch == '/'.code || ch == '>'.code) break;
+        pos++;
+      }
+      var node = new QOLXmlNode(b.getString(nameStart, pos - nameStart));
+      var parent = stack[stack.length - 1];
+      parent.children.push(node);
+      var selfClosing = false;
+      while (pos < len)
+      {
+        var ch = b.get(pos);
+        if (ch <= 32)
+        {
+          pos++;
+          continue;
+        }
+        if (ch == '>'.code)
+        {
+          pos++;
+          break;
+        }
+        if (ch == '/'.code)
+        {
+          selfClosing = true;
+          pos++;
+          continue;
+        }
+        // Attribute.
+        var an = pos;
+        while (pos < len)
+        {
+          var ac = b.get(pos);
+          if (ac == '='.code || ac <= 32 || ac == '>'.code || ac == '/'.code) break;
+          pos++;
+        }
+        var attrName = b.getString(an, pos - an);
+        while (pos < len && b.get(pos) <= 32)
+          pos++;
+        if (pos < len && b.get(pos) == '='.code)
+        {
+          pos++;
+          while (pos < len && b.get(pos) <= 32)
+            pos++;
+          var quote = b.get(pos);
+          if (quote == '"'.code || quote == "'".code)
+          {
+            pos++;
+            var vs = pos;
+            var amp = false;
+            while (pos < len && b.get(pos) != quote)
+            {
+              if (b.get(pos) == '&'.code) amp = true;
+              pos++;
+            }
+            var v = QOLXml.str(b, vs, pos - vs);
+            node.attrs.push(attrName);
+            node.attrs.push(amp ? QOLXml.decode(v) : v);
+            pos++;
+          }
+          else
+          {
+            var vs = pos;
+            while (pos < len && b.get(pos) > 32 && b.get(pos) != '>'.code)
+              pos++;
+            node.attrs.push(attrName);
+            node.attrs.push(QOLXml.str(b, vs, pos - vs));
+          }
+        }
+        else
+        {
+          node.attrs.push(attrName);
+          node.attrs.push('');
+        }
+      }
+      if (!selfClosing) stack.push(node);
+        }
+    this.pos = pos;
+    if (pos >= len)
+    {
+      this.b = null;
+      return true;
+    }
+    return false;
+  }
 }

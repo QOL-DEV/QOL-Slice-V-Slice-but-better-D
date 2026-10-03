@@ -533,6 +533,112 @@ class AnimData
     return -1;
   }
 
+  //
+  // Layer folders and masks (a layer holds the layers right below it that are nested deeper)
+  //
+
+  public static inline function depthOf(l:AnimLayer):Int
+    return l.depth ?? 0;
+
+  /**
+   * Folders and mask layers hold other layers.
+   */
+  public static inline function isGroup(l:AnimLayer):Bool
+    return l.kind == 'folder' || l.mask == true;
+
+  /**
+   * One past the last layer nested under layer `i`.
+   */
+  public static function subtreeEnd(sym:AnimSymbol, i:Int):Int
+  {
+    var d = depthOf(sym.layers[i]);
+    var j = i + 1;
+    while (j < sym.layers.length && depthOf(sym.layers[j]) > d)
+      j++;
+    return j;
+  }
+
+  /**
+   * The folder or mask layer holding layer `i` (-1 at the top level).
+   */
+  public static function parentOf(sym:AnimSymbol, i:Int):Int
+  {
+    var d = depthOf(sym.layers[i]);
+    if (d == 0) return -1;
+    var j = i - 1;
+    while (j >= 0)
+    {
+      if (depthOf(sym.layers[j]) < d) return j;
+      j--;
+    }
+    return -1;
+  }
+
+  /**
+   * Locked itself or inside a locked folder.
+   */
+  public static function isLocked(sym:AnimSymbol, i:Int):Bool
+  {
+    var j = i;
+    while (j >= 0)
+    {
+      var l = sym.layers[j];
+      if (l.locked && (j == i || l.kind == 'folder')) return true;
+      j = parentOf(sym, j);
+    }
+    return false;
+  }
+
+  /**
+   * Hidden itself or inside a hidden folder.
+   */
+  public static function isHidden(sym:AnimSymbol, i:Int):Bool
+  {
+    var j = i;
+    while (j >= 0)
+    {
+      var l = sym.layers[j];
+      if (!l.visible && (j == i || l.kind == 'folder')) return true;
+      j = parentOf(sym, j);
+    }
+    return false;
+  }
+
+  /**
+   * Layers shown as rows in the timeline (the insides of collapsed folders and masks left out).
+   */
+  public static function visibleRows(sym:AnimSymbol):Array<Int>
+  {
+    var out:Array<Int> = [];
+    var i = 0;
+    while (i < sym.layers.length)
+    {
+      out.push(i);
+      var l = sym.layers[i];
+      i = isGroup(l) && l.collapsed == true ? subtreeEnd(sym, i) : i + 1;
+    }
+    return out;
+  }
+
+  /**
+   * Keep depths sensible: a layer is at most one level deeper than a folder/mask right above it.
+   */
+  public static function fixDepths(sym:AnimSymbol):Void
+  {
+    var prevDepth = -1;
+    var prevGroup = false;
+    for (l in sym.layers)
+    {
+      var max = prevDepth < 0 ? 0 : (prevGroup ? prevDepth + 1 : prevDepth);
+      var d = depthOf(l);
+      if (d > max) d = max;
+      if (d < 0) d = 0;
+      l.depth = d == 0 ? null : d;
+      prevDepth = d;
+      prevGroup = isGroup(l);
+    }
+  }
+
   /**
    * Deep copy through JSON (elements, keyframes...).
    */
