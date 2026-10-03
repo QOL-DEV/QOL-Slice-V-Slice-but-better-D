@@ -21,6 +21,7 @@ class QOLToolFactory
       case 'chart': new funkin.qol.editors.QOLChartEditorState();
       case 'modchart': new funkin.qol.editors.ModchartEditorState();
       case 'animator': new funkin.qol.editors.animator.AnimatorState();
+      case 'noteskin': new funkin.qol.editors.NoteSkinEditorState();
       default: null;
     }
   }
