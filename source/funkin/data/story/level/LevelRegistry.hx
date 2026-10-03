@@ -53,7 +53,8 @@ class LevelRegistry extends BaseRegistry<Level, LevelData, LevelEntryParams> imp
   {
     var result:Array<String> = listEntryIds();
     result.sort(SortUtil.defaultsThenAlphabetically.bind(listBaseGameEntryIds()));
-    return result;
+    // QOL Slice: the order set in the Week Editor.
+    return funkin.qol.runtime.QOLWeekOrder.apply(result);
   }
 }
 

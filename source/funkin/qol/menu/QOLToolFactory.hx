@@ -22,6 +22,7 @@ class QOLToolFactory
       case 'modchart': new funkin.qol.editors.ModchartEditorState();
       case 'animator': new funkin.qol.editors.animator.AnimatorState();
       case 'noteskin': new funkin.qol.editors.NoteSkinEditorState();
+      case 'week': new funkin.qol.editors.WeekEditorState();
       default: null;
     }
   }
