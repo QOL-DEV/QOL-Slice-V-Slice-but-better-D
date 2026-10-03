@@ -35,18 +35,47 @@ class AnimDoc
   inline function get_main():AnimSymbol
     return project.symbols[0];
 
+  // Lookups by id, rebuilt when the lists change (big documents have hundreds of symbols).
+  var symIndex:Map<String, AnimSymbol> = new Map();
+  var symIndexOf:Null<Array<AnimSymbol>> = null;
+  var symIndexLen:Int = -1;
+  var bmpIndex:Map<String, AnimBitmapInfo> = new Map();
+  var bmpIndexOf:Null<Array<AnimBitmapInfo>> = null;
+  var bmpIndexLen:Int = -1;
+
   public function symbol(id:String):Null<AnimSymbol>
   {
+    if (id == null) return null;
+    if (symIndexOf != project.symbols || symIndexLen != project.symbols.length) rebuildSymIndex();
+    var s = symIndex.get(id);
+    if (s != null && s.id == id) return s;
+    // Ids can be changed in place; look again.
+    rebuildSymIndex();
+    return symIndex.get(id);
+  }
+
+  function rebuildSymIndex():Void
+  {
+    symIndex = new Map();
     for (s in project.symbols)
-      if (s.id == id) return s;
-    return null;
+      symIndex.set(s.id, s);
+    symIndexOf = project.symbols;
+    symIndexLen = project.symbols.length;
   }
 
   public function bitmapInfo(id:String):Null<AnimBitmapInfo>
   {
-    for (b in project.bitmaps)
-      if (b.id == id) return b;
-    return null;
+    if (id == null) return null;
+    if (bmpIndexOf != project.bitmaps || bmpIndexLen != project.bitmaps.length)
+    {
+      bmpIndex = new Map();
+      for (b in project.bitmaps)
+        bmpIndex.set(b.id, b);
+      bmpIndexOf = project.bitmaps;
+      bmpIndexLen = project.bitmaps.length;
+    }
+    var b = bmpIndex.get(id);
+    return b != null && b.id == id ? b : null;
   }
 
   //

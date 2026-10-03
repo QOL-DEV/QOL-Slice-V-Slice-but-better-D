@@ -1161,7 +1161,14 @@ class AnimatorState extends QOLEditorState
       timeline.follow(frame);
     }
 
-    audio.update(playing, frame);
+    try
+    {
+      audio.update(playing, frame);
+    }
+    catch (e:Dynamic)
+    {
+      trace('[QOL] Sound playback: $e');
+    }
 
     // Property edits made in one mouse press (or one typed value) undo together.
     if (!FlxG.mouse.pressed && !isTyping) editStarted = false;
@@ -1917,11 +1924,11 @@ class AnimatorState extends QOLEditorState
   /**
    * A progress window (with Cancel) for slow imports.
    */
-  public function showProgress(title:String, text:String, onCancel:Void->Void):{update:Float->Void, close:Void->Void}
+  public function showProgress(title:String, text:String, onCancel:Null<Void->Void>):{update:(Float, ?String) -> Void, close:Void->Void}
   {
     var dialog = themePopup(new haxe.ui.containers.dialogs.Dialog());
     dialog.title = title;
-    dialog.buttons = DialogButton.CANCEL;
+    if (onCancel != null) dialog.buttons = DialogButton.CANCEL;
     dialog.destroyOnClose = true;
     var box = new VBox();
     box.styleString = 'spacing: 8px;';
@@ -1940,11 +1947,15 @@ class AnimatorState extends QOLEditorState
     dialog.onDialogClosed = function(_) {
       if (closed) return;
       closed = true;
-      onCancel();
+      if (onCancel != null) onCancel();
     };
     dialog.showDialog(true);
     return {
-      update: p -> if (!closed) bar.pos = Math.round(Math.max(0, Math.min(1, p)) * 100),
+      update: (p, ?t) -> {
+        if (closed) return;
+        bar.pos = Math.round(Math.max(0, Math.min(1, p)) * 100);
+        if (t != null) label.text = t;
+      },
       close: () -> {
         if (closed) return;
         closed = true;
@@ -3953,7 +3964,11 @@ class AnimatorState extends QOLEditorState
     if (!playing)
     {
       refreshProps();
-      audio.scrubAt(frame);
+      try
+      {
+        audio.scrubAt(frame);
+      }
+      catch (e:Dynamic) {}
     }
     timeline.follow(frame);
   }

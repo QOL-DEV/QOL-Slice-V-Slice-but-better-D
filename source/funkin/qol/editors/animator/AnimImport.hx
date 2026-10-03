@@ -717,16 +717,26 @@ class AnimImport
 
   public static function importFlaFiles(ed:AnimatorState, files:Array<QOLPickedFile>):Void
   {
-    try
-    {
-      var doc = XFLFile.read(files);
+    var cancel:Void->Void = () -> {};
+    var progress = ed.showProgress('Opening Animate file', 'Reading...', () -> cancel());
+    cancel = XFLFile.read(files, (doc, warnings) -> {
+      progress.close();
+      var main = files.length > 0 ? haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(files[0].name)) : 'Animate import';
+      if (main != '' && main.toLowerCase() != 'domdocument') doc.project.name = main;
       ed.setDocument(doc);
-      ed.notify('Imported', '${doc.project.name}: ${doc.project.symbols.length - 1} symbols.');
-    }
-    catch (e)
-    {
-      ed.alert('Could not import', Std.string(e));
-    }
+      var msg = '${doc.project.symbols.length - 1} symbols, ${doc.main.layers.length} layers, ${AnimData.symbolLength(doc.main)} frames.';
+      if (warnings.length > 0)
+      {
+        var shown = warnings.slice(0, 8);
+        if (warnings.length > 8) shown.push('...and ${warnings.length - 8} more.');
+        ed.alert('Imported ${doc.project.name}', msg + '\n\n' + shown.join('\n'));
+      }
+      else
+        ed.notify('Imported', msg);
+    }, err -> {
+      progress.close();
+      ed.alert('Could not import', err);
+    }, (p, text) -> progress.update(p, text));
   }
 
   public static function importPsd(ed:AnimatorState):Void

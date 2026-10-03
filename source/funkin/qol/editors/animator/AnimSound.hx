@@ -129,6 +129,17 @@ class AnimSound
   public function toWav():Bytes
     return writeWav(pcm, rate, channels);
 
+  /**
+   * Bytes as characters one for one (safe on binary data, unlike getString's UTF-8 decoding).
+   */
+  public static function ascii(b:Bytes, pos:Int, len:Int):String
+  {
+    var out = new StringBuf();
+    for (i in pos...Std.int(Math.min(b.length, pos + len)))
+      out.addChar(b.get(i));
+    return out.toString();
+  }
+
   public static function writeWav(pcm:Bytes, rate:Int, channels:Int):Bytes
   {
     var o = new BytesOutput();
@@ -155,13 +166,13 @@ class AnimSound
    */
   public static function readWav(b:Bytes):Null<{rate:Int, channels:Int, pcm:Bytes}>
   {
-    if (b.length < 44 || b.getString(0, 4) != 'RIFF' || b.getString(8, 4) != 'WAVE') return null;
+    if (b.length < 44 || ascii(b, 0, 4) != 'RIFF' || ascii(b, 8, 4) != 'WAVE') return null;
     var pos = 12;
     var fmt = -1, channels = 0, rate = 0, bits = 0;
     var data:Null<Bytes> = null;
     while (pos + 8 <= b.length)
     {
-      var id = b.getString(pos, 4);
+      var id = ascii(b, pos, 4);
       var len = b.getInt32(pos + 4);
       var start = pos + 8;
       if (id == 'fmt ')

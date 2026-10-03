@@ -48,8 +48,9 @@ class AnimAudioPlayer
     {
       if (now >= scrubs[i].until)
       {
-        scrubs[i].channel.stop();
+        var ch = scrubs[i].channel;
         scrubs.splice(i, 1);
+        stopChannel(ch);
       }
       i--;
     }
@@ -69,8 +70,8 @@ class AnimAudioPlayer
     {
       if (!layers.contains(layer))
       {
-        cur.channel.stop();
         active.remove(layer);
+        stopChannel(cur.channel);
       }
     }
     for (layer in layers)
@@ -81,14 +82,14 @@ class AnimAudioPlayer
       {
         if (cur != null)
         {
-          cur.channel.stop();
           active.remove(layer);
+          stopChannel(cur.channel);
         }
         continue;
       }
       if (cur != null && cur.key == key && !jumped) continue;
-      if (cur != null) cur.channel.stop();
       active.remove(layer);
+      if (cur != null) stopChannel(cur.channel);
       var ch = start(layer, key, frame, fps);
       if (ch != null) active.set(layer, {key: key, channel: ch});
     }
@@ -131,17 +132,31 @@ class AnimAudioPlayer
 
   public function stopPlayback():Void
   {
-    for (cur in active)
-      cur.channel.stop();
+    var list = [for (cur in active) cur.channel];
     active.clear();
+    for (ch in list)
+      stopChannel(ch);
   }
 
   public function stopAll():Void
   {
     stopPlayback();
-    for (s in scrubs)
-      s.channel.stop();
+    var list = scrubs;
     scrubs = [];
+    for (s in list)
+      stopChannel(s.channel);
+  }
+
+  /**
+   * Stopping a sound the browser never got to start throws; that's fine.
+   */
+  static function stopChannel(ch:SoundChannel):Void
+  {
+    try
+    {
+      ch.stop();
+    }
+    catch (e:Dynamic) {}
   }
 }
 #end
