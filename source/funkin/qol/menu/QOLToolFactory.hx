@@ -23,6 +23,7 @@ class QOLToolFactory
       case 'animator': new funkin.qol.editors.animator.AnimatorState();
       case 'noteskin': new funkin.qol.editors.NoteSkinEditorState();
       case 'week': new funkin.qol.editors.WeekEditorState();
+      case 'freeplay': new funkin.qol.editors.FreeplayEditorState();
       default: null;
     }
   }

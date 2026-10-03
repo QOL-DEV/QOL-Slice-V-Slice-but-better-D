@@ -34,6 +34,46 @@ class QOLInflate
     done(inflateSync(data, zlib, pos, len));
   }
 
+  #if sys
+  static var totalsChecked:Bool = false;
+  static var totals:Bool = false;
+
+  /**
+   * Whether `Uncompress.execute` reports running totals instead of what one call read and wrote. Newer hxcpp versions
+   * report totals, older ones (and other targets) per call. Found out once by inflating a tiny stored block with a small
+   * output buffer: the second call's count only goes past the buffer's size if it's a total.
+   */
+  static function countsAreTotals():Bool
+  {
+    if (totalsChecked) return totals;
+    totalsChecked = true;
+    try
+    {
+      var n = 1000;
+      var raw = Bytes.alloc(5 + n);
+      raw.set(0, 1); // the last block, stored
+      raw.set(1, n & 0xFF);
+      raw.set(2, n >> 8);
+      raw.set(3, ~n & 0xFF);
+      raw.set(4, (~n >> 8) & 0xFF);
+      for (i in 0...n)
+        raw.set(5 + i, i & 0xFF);
+      var u = new haxe.zip.Uncompress(-15);
+      u.setFlushMode(haxe.zip.FlushMode.SYNC);
+      var small = Bytes.alloc(256);
+      var r1 = u.execute(raw, 0, small, 0);
+      var r2 = u.execute(raw, r1.read, small, 0);
+      u.close();
+      totals = r2.write > small.length;
+    }
+    catch (e:Dynamic)
+    {
+      totals = false;
+    }
+    return totals;
+  }
+  #end
+
   public static function inflateSync(data:Bytes, zlib:Bool, pos:Int = 0, len:Int = -1):Null<Bytes>
   {
     if (len < 0) len = data.length - pos;
@@ -42,15 +82,22 @@ class QOLInflate
       #if sys
       var u = new haxe.zip.Uncompress(zlib ? null : -15);
       u.setFlushMode(haxe.zip.FlushMode.SYNC);
+      var totals = countsAreTotals();
       var out = new BytesBuffer();
       var chunk = Bytes.alloc(1 << 20);
       var srcPos = pos;
+      var lastIn = 0;
+      var lastOut = 0;
       while (true)
       {
         var r = u.execute(data, srcPos, chunk, 0);
-        srcPos += r.read;
-        if (r.write > 0) out.addBytes(chunk, 0, r.write);
-        if (r.done || (r.read == 0 && r.write == 0)) break;
+        var readNow = totals ? r.read - lastIn : r.read;
+        var wroteNow = totals ? r.write - lastOut : r.write;
+        lastIn = r.read;
+        lastOut = r.write;
+        srcPos += readNow;
+        if (wroteNow > 0) out.addBytes(chunk, 0, wroteNow);
+        if (r.done || (readNow == 0 && wroteNow == 0) || srcPos >= pos + len) break;
       }
       u.close();
       return out.getBytes();

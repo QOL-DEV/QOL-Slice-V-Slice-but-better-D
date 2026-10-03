@@ -409,6 +409,9 @@ class FreeplayState extends MusicBeatSubState
       }
     }
 
+    // QOL Slice: songs hidden or added in the Freeplay Editor.
+    funkin.qol.runtime.QOLFreeplay.apply(songs, this);
+
     // LOAD MUSIC
 
     // LOAD CHARACTERS

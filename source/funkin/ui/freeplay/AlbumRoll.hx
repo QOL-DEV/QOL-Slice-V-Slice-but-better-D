@@ -195,6 +195,8 @@ class AlbumRoll extends FlxSpriteGroup
     }
 
     albumTitle = FunkinSprite.createSparrow((FlxG.width - 355) - FullScreenScaleMode.gameNotchSize.x, 500, assetKey);
+    // QOL Slice: a plain picture (no sprite sheet) works as a title too.
+    if (albumTitle.frames == null && openfl.utils.Assets.exists(Paths.image(assetKey))) albumTitle.loadGraphic(Paths.image(assetKey));
     albumTitle.visible = this.visible && (albumTitle.frames != null && newAlbumArt.visible) && difficultyStars.visible;
     albumTitle.animation.addByPrefix('idle', 'idle0', 24, true);
     albumTitle.animation.addByPrefix('switch', 'switch0', 24, false);
