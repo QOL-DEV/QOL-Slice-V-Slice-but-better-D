@@ -238,11 +238,13 @@ class AnimExport
   /**
    * One frame of a timeline, flattened over the canvas color (or `bg` if the canvas is transparent).
    */
-  public static function flatFrame(doc:AnimDoc, sym:AnimSymbol, frame:Int, w:Int, h:Int, transparentOk:Bool, ?bg:Int = 0xFFFFFFFF):BitmapData
+  public static function flatFrame(doc:AnimDoc, sym:AnimSymbol, frame:Int, w:Int, h:Int, transparentOk:Bool, ?bg:Int = 0xFFFFFFFF,
+      ?renderer:AnimRender):BitmapData
   {
     var stageBg = (doc.project.bg >>> 24) == 0 ? (transparentOk ? 0 : bg) : (doc.project.bg | 0xFF000000);
     var bmp = new BitmapData(w, h, true, stageBg);
-    var renderer = new AnimRender(doc);
+    // Reusing one renderer for every frame keeps its shape cache (much faster for long animations).
+    if (renderer == null) renderer = new AnimRender(doc);
     var spr = renderer.render(sym, frame, {forExport: true});
     var m = new Matrix();
     if (sym != doc.main) m.translate(doc.project.width / 2, doc.project.height / 2);
@@ -277,17 +279,65 @@ class AnimExport
       var size = evenSize(ed.doc, scale);
       var len = AnimData.symbolLength(ed.sym);
       var jpegs:Array<haxe.io.Bytes> = [];
-      for (f in 0...len)
-      {
-        var bmp = flatFrame(ed.doc, ed.sym, f, size.w, size.h, false);
+      eachFrame(ed, 'Exporting video', len, (f, renderer) -> {
+        var bmp = flatFrame(ed.doc, ed.sym, f, size.w, size.h, false, 0xFFFFFFFF, renderer);
         var ba:openfl.utils.ByteArray = bmp.encode(bmp.rect, new openfl.display.JPEGEncoderOptions(quality));
         jpegs.push(ba);
         bmp.dispose();
-      }
-      var pcm = withSound ? soundMix(ed.doc, ed.sym) : null;
-      var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeAvi(jpegs, size.w, size.h, ed.doc.project.fps, pcm));
-      ed.notify('Exported', '$saved ($len frames${pcm != null ? ', with sound' : ''})');
+      }, () -> {
+        var pcm = withSound ? soundMix(ed.doc, ed.sym) : null;
+        var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeAvi(jpegs, size.w, size.h, ed.doc.project.fps, pcm));
+        ed.notify('Exported', '$saved ($len frames${pcm != null ? ', with sound' : ''})');
+      });
     });
+  }
+
+  /**
+   * Render every frame a few at a time with a progress bar (Cancel stops), so long animations don't freeze the game.
+   */
+  public static function eachFrame(ed:AnimatorState, title:String, len:Int, render:(Int, AnimRender) -> Void, done:Void->Void):Void
+  {
+    var renderer = new AnimRender(ed.doc);
+    var cancelled = false;
+    var progress = ed.showProgress(title, 'Frame 1 of $len', () -> cancelled = true);
+    var f = 0;
+    function step():Void
+    {
+      if (cancelled) return;
+      var t0 = haxe.Timer.stamp();
+      try
+      {
+        while (f < len && haxe.Timer.stamp() - t0 < 0.1)
+        {
+          render(f, renderer);
+          f++;
+        }
+      }
+      catch (e:Dynamic)
+      {
+        cancelled = true;
+        progress.close();
+        ed.alert('Export failed', 'Frame ${f + 1}: $e');
+        return;
+      }
+      if (f < len)
+      {
+        progress.update(f / len, 'Frame ${f + 1} of $len');
+        haxe.Timer.delay(step, 1);
+        return;
+      }
+      cancelled = true;
+      progress.close();
+      try
+      {
+        done();
+      }
+      catch (e:Dynamic)
+      {
+        ed.alert('Export failed', Std.string(e));
+      }
+    }
+    step();
   }
 
   public static function gifDialog(ed:AnimatorState):Void
@@ -304,14 +354,14 @@ class AnimExport
       var h = Std.int(Math.max(1, Math.round(ed.doc.project.height * scale)));
       var len = AnimData.symbolLength(ed.sym);
       var frames:Array<haxe.io.Bytes> = [];
-      for (f in 0...len)
-      {
-        var bmp = flatFrame(ed.doc, ed.sym, f, w, h, true);
+      eachFrame(ed, 'Exporting GIF', len, (f, renderer) -> {
+        var bmp = flatFrame(ed.doc, ed.sym, f, w, h, true, 0xFFFFFFFF, renderer);
         frames.push(AnimIO.argbBytes(bmp));
         bmp.dispose();
-      }
-      var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeGif(frames, w, h, ed.doc.project.fps));
-      ed.notify('Exported', '$saved ($len frames, ${w}x$h)');
+      }, () -> {
+        var saved = ModWorkspace.saveBytes(path, AnimVideoExport.writeGif(frames, w, h, ed.doc.project.fps));
+        ed.notify('Exported', '$saved ($len frames, ${w}x$h)');
+      });
     });
   }
 
