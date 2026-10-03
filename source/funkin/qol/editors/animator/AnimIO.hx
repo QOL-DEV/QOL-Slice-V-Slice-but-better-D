@@ -60,7 +60,7 @@ class AnimIO
       if (!ModWorkspace.exists(path)) ModWorkspace.saveBytes(path, snd.toWav());
     }
     // Small documents are saved readable; big ones (imported .fla files) as compact as possible.
-    var json = haxe.Json.stringify(doc.project);
+    var json = funkin.qol.util.QOLFastJson.stringify(doc.project);
     if (json.length < 2000000) json = haxe.Json.stringify(doc.project, null, '  ');
     return ModWorkspace.saveText(jsonPath(id), json);
   }

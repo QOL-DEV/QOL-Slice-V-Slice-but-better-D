@@ -120,10 +120,10 @@ class AnimDoc
           var lj = layerJson.get(l);
           // Symbols marked changed are checked layer by layer; a layer is saved again only if it changed.
           var fp = AnimLayerJson.fingerprint(l);
-          if (lj == null || lj.fp != fp) lj = new AnimLayerJson(haxe.Json.stringify(l), fp);
+          if (lj == null || lj.fp != fp) lj = new AnimLayerJson(funkin.qol.util.QOLFastJson.stringify(l), fp);
           layers.push(lj);
         }
-        cached = new AnimSymbolJson(sym.id, haxe.Json.stringify(head), layers);
+        cached = new AnimSymbolJson(sym.id, funkin.qol.util.QOLFastJson.stringify(head), layers);
       }
       newSymJson.set(sym, cached);
       for (i in 0...sym.layers.length)
@@ -140,7 +140,7 @@ class AnimDoc
     allDirty = false;
     if (editingId != null) dirty.set(editingId, true);
     return {
-      meta: haxe.Json.stringify(meta),
+      meta: funkin.qol.util.QOLFastJson.stringify(meta),
       syms: syms,
       library: [for (b in project.bitmaps) if (b.library == true) b.id]
     };
